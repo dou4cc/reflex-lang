@@ -53,7 +53,7 @@ const ast2signals = async source => {
 				list[i] = await buffer2str(new Uint8Array(content.length / 2).map((_, i) => Number.parseInt(content.substr(i * 2, 2), 16)));
 				continue;
 			}
-			if(content.startsWith("$")){
+			if(content.startsWith("$") && !/^\D/u.test(content.slice(1))){
 				list[i] = "$".repeat(content.slice(1));
 				continue;
 			}
@@ -176,11 +176,22 @@ const vm = () => {
 	};
 };
 
-const int_add = (a, b) => {
-	[a, b] = [a, b].map(a => new Uint8Array(a));
-	const result = new Uint8ClampedArray(Math.max(a.length, b.length) + 1);
-	result.reduce((_0, _1, i) => result[i - 1] -= Math.max(0, result[i] = (result[i - 1] += (a[i - 1] || 0) + (b[i - 1] || 0)) - 256));
-	return result.buffer;
+const uint_shorten = a => {
+	a = new Uint8Array(a);
+	let i = a.length - 1;
+	while(!a[i] && i > -2) i -= 1;
+	return a.slice(0, i + 1).buffer;
+};
+
+const uint_add = (a, b) => {
+	[a, b] = [a, b].map(a => new Uint8Array(uint_shorten(a)));
+	const result = new Uint8Array(Math.max(a.length, b.length) + 1);
+	result.reduce((_0, _1, i) => {
+		const n = result[i - 1] + (a[i - 1] || 0) + (b[i - 1] || 0);
+		result[i] = n > 256;
+		result[i - 1] = n % 256;
+	});
+	return uint_shorten(result.buffer);
 };
 
 const str2buffer = async string => {
@@ -199,6 +210,9 @@ const str2buffer = async string => {
 const stdvm = () => {
 	const vm0 = vm();
 	return vm;
+};
+
+const signals2code = (...signals) => {
 };
 
 stdvm;
