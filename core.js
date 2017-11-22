@@ -1,5 +1,70 @@
 ﻿"use strict";
 
+const flatten = (...list) => {
+	const begin = Symbol();
+	const end = Symbol();
+	const f = list => [].concat(...list.map(a => Array.isArray(a) ? [begin, ...f(a), end] : a));
+	return [begin, end, ...f(list)];
+};
+
+const unflatten = (begin, end, ...list) => {
+	const pos = list.lastIndexOf(begin);
+	if(pos < 0) return list;
+	list.splice(pos, 0, list.splice(pos, list.indexOf(end, pos) - pos + 1).slice(1, -1));
+	return unflatten(begin, end, ...list);
+};
+
+const code2ast = source => {
+	source = source.replace(/\r\n?/gu, "\n");
+	const words = source.match(/`(?:\\`|[^`])*`|[[\]]|(?:(?!\]|;)\S)+|;.*/gu);
+	return unflatten("[", "]", ...words.filter(a => !a.startsWith(";")).map(a => {
+		if(/^[[\]]$/u.test(a)) return a;
+		if(/^`.*`$/u.test(a)) return {flag: "`", content:
+			a.slice(1, -1)
+			.replace(/\\(\\*`)/gu, "$1")
+			.replace(/(^|[^\\])\\[nrt]/gu, ($, $1) => $1 + {n: "\n", r: "\r", t: "\t"}[$1])
+			.replace(/(^|[^\\])\\([0-9a-f]+);/giu, ($, $1, $2) => $1 + String.fromCodePoint(Number.parseInt($2, 16)))
+			.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt]))/gu, "$1")};
+		return {flag: "", content: a};
+	}));
+};
+
+const buffer2str = async buffer => {
+	try{
+		return Buffer(buffer).toString();
+	}catch(error){}
+	const reader = new FileReader;
+	const result = new Promise((resolve, reject) => {
+		reader.addEventListener("load", () => resolve(reader.result));
+		reader.addEventListener("error", ({error}) => reject(error));
+	});
+	reader.readAsBinaryString(new Blob([buffer]));
+	return await result;
+};
+
+const ast2signals = async source => {
+	const [begin, end, ...list] = flatten(...source);
+	for(let i in list){
+		if(typeof list[i] !== "object") continue;
+		let {content} = list[i];
+		if(!list[i].flag){
+			if(content.startsWith("%")){
+				content = (content.length % 2 ? "" : "0") + content.slice(1);
+				list[i] = await buffer2str(new Uint8Array(content.length / 2).map((_, i) => Number.parseInt(content.substr(i * 2, 2), 16)));
+				continue;
+			}
+			if(content.startsWith("$")){
+				list[i] = "$".repeat(content.slice(1));
+				continue;
+			}
+		}
+		list[i] = content;
+	}
+	return unflatten(begin, end, ...list);
+};
+
+const code2signals = async source => await ast2signals(code2ast(source));
+
 const reflex = free => {
 	const off = () => !children.size && !listeners.size && free && free();
 	const children = new Map;
@@ -29,20 +94,6 @@ const reflex = free => {
 		path: (...list) => f(path.concat(list)),
 	});
 	return f([]);
-};
-
-const flatten = (...list) => {
-	const begin = Symbol();
-	const end = Symbol();
-	const f = list => [].concat(...list.map(a => Array.isArray(a) ? [begin, ...f(a), end] : a));
-	return [begin, end, ...f(list)];
-};
-
-const unflatten = (begin, end, ...list) => {
-	const pos = list.lastIndexOf(begin);
-	if(pos < 0) return list;
-	list.splice(pos, 0, list.splice(pos, list.indexOf(end, pos) - pos + 1).slice(1, -1));
-	return unflatten(begin, end, ...list);
 };
 
 const multi_key_map = () => {
@@ -125,51 +176,32 @@ const vm = () => {
 	};
 };
 
-const code2ast = source => {
-	source = source.replace(/\r\n?/gu, "\n");
-	const words = source.match(/`(?:\\`|[^`])*`|[[\]]|(?:(?!\]|;)\S)+|;.*/gu);
-	return unflatten("[", "]", ...words.filter(a => !a.startsWith(";")).map(a => {
-		if(/^[[\]]$/u.test(a)) return a;
-		if(/^`.*`$/u.test(a)) return {flag: "`", content:
-			a.slice(1, -1)
-			.replace(/\\(\\*`)/gu, "$1")
-			.replace(/(^|[^\\])\\[nrt]/gu, ($, $1) => $1 + {n: "\n", r: "\r", t: "\t"}[$1])
-			.replace(/(^|[^\\])\\([0-9a-f]+);/giu, ($, $1, $2) => $1 + String.fromCodePoint(Number.parseInt($2, 16)))
-			.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt]))/gu, "$1")};
-		return {flag: "", content: a};
-	}));
+const int_add = (a, b) => {
+	[a, b] = [a, b].map(a => new Uint8Array(a));
+	const result = new Uint8ClampedArray(Math.max(a.length, b.length) + 1);
+	result.reduce((_0, _1, i) => result[i - 1] -= Math.max(0, result[i] = (result[i - 1] += (a[i - 1] || 0) + (b[i - 1] || 0)) - 256));
+	return result.buffer;
 };
 
-const ast2signals = async source => {
-	const [begin, end, ...list] = flatten(...source);
-	for(let i in list){
-		if(typeof list[i] !== "object") continue;
-		let {content} = list[i];
-		if(!list[i].flag){
-			if(content.startsWith("%")){
-				content = (content.length % 2 ? "" : "0") + content.slice(1);
-				const reader = new FileReader;
-				const result = new Promise((resolve, reject) => {
-					reader.addEventListener("load", () => resolve(reader.result));
-					reader.addEventListener("error", ({error}) => reject(error));
-				});
-				reader.readAsBinaryString(new Blob([new Uint8Array(content.length / 2).map((_, i) => Number.parseInt(content.substr(i * 2, 2), 16))]));
-				list[i] = await result;
-				continue;
-			}
-			if(content.startsWith("$")){
-				list[i] = "$".repeat(content.slice(1));
-				continue;
-			}
-		}
-		list[i] = content;
-	}
-	return unflatten(begin, end, ...list);
+const str2buffer = async string => {
+	try{
+		return new Uint8Array(Buffer(string)).buffer;
+	}catch(error){}
+	const reader = new FileReader;
+	const result = new Promise((resolve, reject) => {
+		reader.addEventListener("load", () => resolve(reader.result));
+		reader.addEventListener("error", ({error}) => reject(error));
+	});
+	reader.readAsArrayBuffer(new Blob([string]));
+	return await result;
 };
 
-const code2signals = async source => await ast2signals(code2ast(source));
+const stdvm = () => {
+	const vm0 = vm();
+	return vm;
+};
 
-vm;
+stdvm;
 
 /*test*
 var vm0 = vm();
