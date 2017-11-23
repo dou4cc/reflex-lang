@@ -213,10 +213,13 @@ const stdvm = () => {
 
 const signals2code = (...signals) => {
 	const [begin, end, ...list] = flatten(...signals);
-	return list.map(a =>
-		a === begin ? "[" : a === end ? "]": a
+	return list
+	.map(a =>
+		a === begin ? "[\t" : a === end ? "\t]": "`" + a
 		.replace(/\\(?:[0-9A-Fa-f]+;|[nrt])|`/gu, "\\$&")
-		.replace(/[\n\r\t]/gu, $ => ({"\n": "\\n", "\r": "\\r", "\t": "\\t"})[$])).join(" ");
+		.replace(/[\n\r\t]/gu, $ => ({"\n": "\\n", "\r": "\\r", "\t": "\\t"})[$]) + "`")
+	.join(" ")
+	.replace(/ ?\t ?/gu, "");
 };
 
 stdvm;
