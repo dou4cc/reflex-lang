@@ -52,7 +52,7 @@ const ast2signals = async source => {
 				list[i] = await buffer2str(new Uint8Array(content.length / 2).map((_, i) => Number.parseInt(content.substr(i * 2, 2), 16)));
 				continue;
 			}
-			if(content.startsWith("$") && !/^\D/u.test(content.slice(1))){
+			if(/^\$\d/u.test(content)){
 				list[i] = "$".repeat(content.slice(1));
 				continue;
 			}
