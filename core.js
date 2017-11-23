@@ -21,10 +21,9 @@ const code2ast = source => {
 		if(/^[[\]]$/u.test(a)) return a;
 		if(/^`.*`$/u.test(a)) return {flag: "`", content:
 			a.slice(1, -1)
-			.replace(/\\(\\*`)/gu, "$1")
 			.replace(/(^|[^\\])\\[nrt]/gu, ($, $1) => $1 + {n: "\n", r: "\r", t: "\t"}[$1])
 			.replace(/(^|[^\\])\\([0-9a-f]+);/giu, ($, $1, $2) => $1 + String.fromCodePoint(Number.parseInt($2, 16)))
-			.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt]))/gu, "$1")};
+			.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt])|\\*`)/gu, "$1")};
 		return {flag: "", content: a};
 	}));
 };
@@ -188,7 +187,7 @@ const uint_add = (a, b) => {
 	const result = new Uint8Array(Math.max(a.length, b.length) + 1);
 	result.reduce((_0, _1, i) => {
 		const n = result[i - 1] + (a[i - 1] || 0) + (b[i - 1] || 0);
-		result[i] = n > 256;
+		result[i] = n > 255;
 		result[i - 1] = n % 256;
 	});
 	return uint_shorten(result.buffer);
@@ -209,16 +208,21 @@ const str2buffer = async string => {
 
 const stdvm = () => {
 	const vm0 = vm();
-	return vm;
+	return vm0;
 };
 
 const signals2code = (...signals) => {
+	const [begin, end, ...list] = flatten(...signals);
+	return list.map(a =>
+		a === begin ? "[" : a === end ? "]": a
+		.replace(/\\(?:[0-9A-Fa-f]+;|[nrt])|`/gu, "\\$&")
+		.replace(/[\n\r\t]/gu, $ => ({"\n": "\\n", "\r": "\\r", "\t": "\\t"})[$])).join(" ");
 };
 
 stdvm;
 
 /*test*
-var vm0 = vm();
+var vm0 = stdvm();
 vm0.on(["+"], (a, b, ...rest) => rest.length || vm0.emit(["+", a, b, (+a + +b).toString()]));
 vm0.on(["log"], console.log);
 vm0.emit(["on", ["+", "", "", ""], ["log", "$", "+", "$$", "=", "$$$"]]);
