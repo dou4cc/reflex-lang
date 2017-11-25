@@ -21,10 +21,9 @@ const code2ast = source => {
 		if(/^[[\]]$/u.test(a)) return a;
 		if(/^`.*`$/u.test(a)) return {flag: "`", content:
 			a.slice(1, -1)
-			.replace(/\\(\\*`)/gu, "$1")
 			.replace(/(^|[^\\])\\[nrt]/gu, ($, $1) => $1 + {n: "\n", r: "\r", t: "\t"}[$1])
 			.replace(/(^|[^\\])\\([0-9a-f]+);/giu, ($, $1, $2) => $1 + String.fromCodePoint(Number.parseInt($2, 16)))
-			.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt]))/gu, "$1")};
+			.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt])|\\*`)/gu, "$1")};
 		return {flag: "", content: a};
 	}));
 };
@@ -53,7 +52,7 @@ const ast2signals = async source => {
 				list[i] = await buffer2str(new Uint8Array(content.length / 2).map((_, i) => Number.parseInt(content.substr(i * 2, 2), 16)));
 				continue;
 			}
-			if(content.startsWith("$")){
+			if(/^\$\d/u.test(content)){
 				list[i] = "$".repeat(content.slice(1));
 				continue;
 			}
@@ -176,11 +175,35 @@ const vm = () => {
 	};
 };
 
-const int_add = (a, b) => {
-	[a, b] = [a, b].map(a => new Uint8Array(a));
-	const result = new Uint8ClampedArray(Math.max(a.length, b.length) + 1);
-	result.reduce((_0, _1, i) => result[i - 1] -= Math.max(0, result[i] = (result[i - 1] += (a[i - 1] || 0) + (b[i - 1] || 0)) - 256));
-	return result.buffer;
+const uint_shorten = a => {
+	a = new Uint8Array(a);
+	let i = a.length - 1;
+	while(!a[i] && i > -2) i -= 1;
+	return a.subarray(0, i + 1).buffer;
+};
+
+const uint_add = (a, b) => {
+	[a, b] = [a, b].map(a => new Uint8Array(uint_shorten(a)));
+	const result = new Uint8Array(Math.max(a.length, b.length) + 1);
+	result.reduce((_0, _1, i) => {
+		const n = result[i - 1] + (a[i - 1] || 0) + (b[i - 1] || 0);
+		result[i] = n > 255;
+		result[i - 1] = n % 256;
+	});
+	return uint_shorten(result.buffer);
+};
+
+const uint_cmp = (a, b) => {
+	[a, b] = [a, b].map(a => new Uint8Array(uint_shorten(a)));
+	return a.length + b.length && Math.sign(a.length - b.length || a.subarray(-1)[0] - b.subarray(-1)[0]) || uint_cmp(...[a, b].map(a => a.subarray(0, -1)));
+};
+
+const uint_sub = (a, b) => {
+	if(uint_cmp(a, b) < 0) throw null;
+	[a, b] = [a, b].map(a => new Uint8Array(uint_shorten(a)));
+	a = new Uint8Array(a);
+	a.forEach((_, i) => (a[i] -= b[i] || 0) < 0 && a.subarray(i + 1).every((_, j) => (a[i + j + 1] -= 1) < 0));
+	return uint_shorten(a.buffer);
 };
 
 const str2buffer = async string => {
@@ -196,15 +219,38 @@ const str2buffer = async string => {
 	return await result;
 };
 
+const same_lists = (...lists) => {
+	if(!Array.isArray(lists[0])) return lists.splice(1).every(a => lists.includes(a));
+	return lists.slice(1).every(a => Array.isArray(a) && a.length === lists[0].length) && lists[0].every((_, i) => same_lists(...lists.map(list => list[i])));
+};
+
 const stdvm = () => {
 	const vm0 = vm();
-	return vm;
+	vm0.on(["="], (args, ...rest) => rest.length || Array.isArray(args) && vm0.emit(["=", args, same_lists(...args).toString()]));
+	vm0.on(["concat"], (args, ...rest) => rest.length || Array.isArray(args) && vm0.emit(["concat", args, args.every(a => typeof a === "string") ? args.join("") : [].concat(...args)]));
+	vm0.on(["split"], (args, ...rest) => rest.length || Array.from(args).length && vm0.emit(["split", args, ...args]));
+	vm0.emit(
+		["on", ["true", [""], ""], "$"],
+		["on", ["false", [""], ""], "$$"],
+	);
+	return vm0;
+};
+
+const signals2code = (...signals) => {
+	const [begin, end, ...list] = flatten(...signals);
+	return list
+	.map(a =>
+		a === begin ? "[\t" : a === end ? "\t]": "`" + a
+		.replace(/\\(?:[0-9A-Fa-f]+;|[nrt])|`/gu, "\\$&")
+		.replace(/[\n\r\t]/gu, $ => ({"\n": "\\n", "\r": "\\r", "\t": "\\t"})[$]) + "`")
+	.join(" ")
+	.replace(/ ?\t ?/gu, "");
 };
 
 stdvm;
 
 /*test*
-var vm0 = vm();
+var vm0 = stdvm();
 vm0.on(["+"], (a, b, ...rest) => rest.length || vm0.emit(["+", a, b, (+a + +b).toString()]));
 vm0.on(["log"], console.log);
 vm0.emit(["on", ["+", "", "", ""], ["log", "$", "+", "$$", "=", "$$$"]]);
