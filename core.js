@@ -28,6 +28,24 @@ const code2ast = source => {
 	}));
 };
 
+const uint_shorten = a => {
+	a = new Uint8Array(a);
+	let i = a.length - 1;
+	while(!a[i] && i > -2) i -= 1;
+	return a.subarray(0, i + 1).buffer;
+};
+
+const num2uint = number => {
+	if(!Number.isSafeInteger(number) || number < 0) throw new Error;
+	const result = new Uint8Array(8);
+	result.every((a, i) => {
+		if(number < 1) return;
+		result[i] = number % 256;
+		number /= 256;
+	});
+	return uint_shorten(result.buffer);
+};
+
 const buffer2str = async buffer => {
 	try{
 		return Buffer(buffer).toString();
@@ -47,13 +65,22 @@ const ast2signals = async source => {
 		if(typeof list[i] !== "object") continue;
 		let {content} = list[i];
 		if(!list[i].flag){
+			if(content.startsWith("\\")){
+				list[i] = await buffer2str(num2uint(+content.slice(1)));
+				continue;
+			}
 			if(content.startsWith("%")){
 				content = (content.length % 2 ? "" : "0") + content.slice(1);
-				list[i] = await buffer2str(new Uint8Array(content.length / 2).map((_, i) => Number.parseInt(content.substr(i * 2, 2), 16)));
+				list[i] = await buffer2str(new Uint8Array(content.length / 2).map((a, i) => {
+					if(Number.isNaN(a = Number.parseInt(content.substr(i * 2, 2), 16))) throw new Error;
+					return a;
+				}).buffer);
 				continue;
 			}
 			if(/^\$\d/u.test(content)){
-				list[i] = "$".repeat(content.slice(1));
+				content = +content.slice(1);
+				if(Number.isNaN(content)) throw new Error;
+				list[i] = "$".repeat(content);
 				continue;
 			}
 		}
@@ -144,7 +171,7 @@ const vm = () => {
 				if(pattern === "") return args.push(list);
 				if(list.length > 1) return;
 				if(!Array.isArray(pattern) || !Array.isArray(list[0])) return list.includes(escape(pattern));
-				return pattern.length <= list[0].length && (!list[0].length || list[0].splice(0, pattern.length - 1).map(a => [a]).concat(list).every((a, i) => f(pattern[i], ...a)));
+				return pattern.length <= list[0].length + 1 && (pattern.length ? list[0].splice(0, pattern.length - 1).map(a => [a]).concat(list).every((a, i) => f(pattern[i], ...a)) : !list[0].length);
 			};
 			const args = [[pattern, ...effects]];
 			return f(pattern, ...unflatten1(...path, ...list)) && args;
@@ -170,16 +197,14 @@ const vm = () => {
 	reflex0.on(begin, "match", (...list) => unflatten1(...list.slice(0, -1)).forEach(signal => reflex1.emit(...flatten1(signal))));
 	return {
 		emit,
-		on: (path, listener) => listener ? reflex0.on(...flatten1(path).slice(0, ...Array.isArray(path) ? [-1] : []), (...list) => listener(...unflatten1(...list.slice(0, -1)))) : reflex0.on((...list) => path(...unflatten1(...list))),
+		on: (path, listener) => {
+			if(!listener) return reflex0.on((...list) => path(...unflatten1(...list)));
+			path = flatten1(path);
+			const m = path.slice().reverse().concat(0).findIndex(a => a !== end);
+			return reflex0.on(...path.slice(0, path.length - m), (...list) => listener(...unflatten1(...Array((m || 1) - 1).fill(begin).concat(list.slice(0, -1)))));
+		},
 		exec: async code => emit(...await code2signals(code)),
 	};
-};
-
-const uint_shorten = a => {
-	a = new Uint8Array(a);
-	let i = a.length - 1;
-	while(!a[i] && i > -2) i -= 1;
-	return a.subarray(0, i + 1).buffer;
 };
 
 const uint_add = (a, b) => {
@@ -199,7 +224,7 @@ const uint_cmp = (a, b) => {
 };
 
 const uint_sub = (a, b) => {
-	if(uint_cmp(a, b) < 0) throw null;
+	if(uint_cmp(a, b) < 0) throw new Error;
 	[a, b] = [a, b].map(a => new Uint8Array(uint_shorten(a)));
 	a = new Uint8Array(a);
 	a.forEach((_, i) => (a[i] -= b[i] || 0) < 0 && a.subarray(i + 1).every((_, j) => (a[i + j + 1] -= 1) < 0));
@@ -226,9 +251,9 @@ const same_lists = (...lists) => {
 
 const stdvm = () => {
 	const vm0 = vm();
-	vm0.on(["="], (args, ...rest) => rest.length || Array.isArray(args) && vm0.emit(["=", args, same_lists(...args).toString()]));
-	vm0.on(["concat"], (args, ...rest) => rest.length || Array.isArray(args) && vm0.emit(["concat", args, args.every(a => typeof a === "string") ? args.join("") : [].concat(...args)]));
-	vm0.on(["split"], (args, ...rest) => rest.length || Array.from(args).length && vm0.emit(["split", args, ...args]));
+	vm0.on([["same"]], (args, ...rest) => rest.length || Array.isArray(args) && vm0.emit([["same", ...args], same_lists(...args).toString()]));
+	vm0.on([["concat"]], (args, ...rest) => rest.length || Array.isArray(args) && vm0.emit([["concat", ...args], args.every(a => typeof a === "string") ? args.join("") : [].concat(...args)]));
+	vm0.on([["split"]], ([arg, ...rest0], ...rest1) => rest0.length || rest1.length || Array.from(arg).length && vm0.emit([["split", arg], ...arg]));
 	vm0.emit(
 		["on", ["true", [""], ""], "$"],
 		["on", ["false", [""], ""], "$$"],
@@ -240,11 +265,11 @@ const signals2code = (...signals) => {
 	const [begin, end, ...list] = flatten(...signals);
 	return list
 	.map(a =>
-		a === begin ? "[\t" : a === end ? "\t]": "`" + a
+		a === begin ? "[ \t" : a === end ? "\t ]": "`" + a
 		.replace(/\\(?:[0-9A-Fa-f]+;|[nrt])|`/gu, "\\$&")
 		.replace(/[\n\r\t]/gu, $ => ({"\n": "\\n", "\r": "\\r", "\t": "\\t"})[$]) + "`")
 	.join(" ")
-	.replace(/ ?\t ?/gu, "");
+	.replace(/ \t /gu, "");
 };
 
 stdvm;
@@ -253,6 +278,6 @@ stdvm;
 var vm0 = stdvm();
 vm0.on(["+"], (a, b, ...rest) => rest.length || vm0.emit(["+", a, b, (+a + +b).toString()]));
 vm0.on(["log"], console.log);
-vm0.emit(["on", ["+", "", "", ""], ["log", "$", "+", "$$", "=", "$$$"]]);
+vm0.emit(["on", ["+", "", "", "", ""], ["log", "$", "+", "$$", "=", "$$$"]]);
 vm0.emit(["+", "1", "1"]);
 //*/
