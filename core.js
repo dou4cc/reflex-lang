@@ -207,6 +207,21 @@ const vm = () => {
 	};
 };
 
+const buffer_and = (a, b) => {
+	[a, b] = [a, b].map(a => new Uint8Array(a));
+	return new Uint8Array(Math.min(a.length, b.length)).map((_, i) => a[i] & b[i]).buffer;
+};
+
+const buffer_or = (a, b) => {
+	[a, b] = [a, b].map(a => new Uint8Array(a));
+	return new Uint8Array(Math.min(a.length, b.length)).map((_, i) => a[i] | b[i]).buffer;
+};
+
+const buffer_xor = (a, b) => {
+	[a, b] = [a, b].map(a => new Uint8Array(a));
+	return new Uint8Array(Math.min(a.length, b.length)).map((_, i) => a[i] ^ b[i]).buffer;
+};
+
 const uint_add = (a, b) => {
 	[a, b] = [a, b].map(a => new Uint8Array(uint_shorten(a)));
 	const result = new Uint8Array(Math.max(a.length, b.length) + 1);
@@ -252,8 +267,10 @@ const same_lists = (...lists) => {
 const stdvm = () => {
 	const vm0 = vm();
 	vm0.on([["same"]], (args, ...rest) => rest.length || Array.isArray(args) && vm0.emit([["same", ...args], same_lists(...args).toString()]));
-	vm0.on([["concat"]], (args, ...rest) => rest.length || Array.isArray(args) && vm0.emit([["concat", ...args], args.every(a => typeof a === "string") ? args.join("") : [].concat(...args)]));
-	vm0.on([["split"]], ([arg, ...rest0], ...rest1) => rest0.length || rest1.length || Array.from(arg).length && vm0.emit([["split", arg], ...arg]));
+	vm0.on([["concat"]], (args, ...rest) => rest.length || Array.isArray(args) && vm0.emit([["concat", ...args], args.every(a => typeof a === "string") ? args.join("") : [].concat(...args.map(a => {
+		const list = Array.from(a);
+		return list.length ? list : a;
+	}))]));
 	vm0.emit(
 		["on", ["true", [""], ""], "$"],
 		["on", ["false", [""], ""], "$$"],
