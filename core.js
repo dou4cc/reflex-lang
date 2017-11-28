@@ -70,7 +70,8 @@ const ast2signals = async source => {
 				continue;
 			}
 			if(content.startsWith("%")){
-				content = (content.length % 2 ? "" : "0") + content.slice(1);
+				if(!(content.length % 2)) throw new Error;
+				content = content.slice(1);
 				list[i] = await buffer2str(new Uint8Array(content.length / 2).map((a, i) => {
 					if(Number.isNaN(a = Number.parseInt(content.substr(i * 2, 2), 16))) throw new Error;
 					return a;
@@ -209,18 +210,20 @@ const vm = () => {
 
 const buffer_and = (a, b) => {
 	[a, b] = [a, b].map(a => new Uint8Array(a));
-	return new Uint8Array(Math.min(a.length, b.length)).map((_, i) => a[i] & b[i]).buffer;
+	return new Uint8Array(Math.max(a.length, b.length)).map((_, i) => (a[i] || 0xff) & (b[i] || 0xff)).buffer;
 };
 
 const buffer_or = (a, b) => {
 	[a, b] = [a, b].map(a => new Uint8Array(a));
-	return new Uint8Array(Math.min(a.length, b.length)).map((_, i) => a[i] | b[i]).buffer;
+	return new Uint8Array(Math.max(a.length, b.length)).map((_, i) => (a[i] || 0x00) | (b[i] || 0x00)).buffer;
 };
 
 const buffer_xor = (a, b) => {
 	[a, b] = [a, b].map(a => new Uint8Array(a));
-	return new Uint8Array(Math.min(a.length, b.length)).map((_, i) => a[i] ^ b[i]).buffer;
+	return new Uint8Array(Math.max(a.length, b.length)).map((_, i) => (a[i] || 0xff) ^ (b[i] || 0x00)).buffer;
 };
+
+const buffer_not = a => new Uint8Array(a).map(a => ~a).buffer;
 
 const uint_add = (a, b) => {
 	[a, b] = [a, b].map(a => new Uint8Array(uint_shorten(a)));
