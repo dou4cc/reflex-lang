@@ -37,7 +37,7 @@ const uint_shorten = buffer_fn(a => {
 });
 
 const num2uint = number => {
-	if(!Number.isSafeInteger(number) || number < 0) throw new Error;
+	if(!Number.isSafeInteger(number) || number < 0) throw new TypeError("Cannot convert a non-natural or unsafe number to a uint.");
 	const result = new Uint8Array(8);
 	for(let i = 0; number >= 1; i += 1){
 		result[i] = number % 0xff;
@@ -57,18 +57,18 @@ const ast2signals = source => {
 				continue;
 			}
 			if(/^%/u.test(content)){
-				if(!(content.length % 2)) throw new Error;
+				if(!(content.length % 2)) throw new SyntaxError("Invalid token.");
 				content = content.slice(1);
 				list[i] = new Uint8Array(content.length / 2).map((a, i) => {
 					a = Number.parseInt(content.substr(i * 2, 2), 16);
-					if(Number.isNaN(a)) throw new Error;
+					if(Number.isNaN(a)) throw new SyntaxError("Invalid token.");
 					return a;
 				}).buffer;
 				continue;
 			}
 			if(/^\$\d/u.test(content)){
 				content = +content.slice(1);
-				if(Number.isNaN(content)) throw new Error;
+				if(Number.isNaN(content)) throw new SyntaxError("Invalid token.");
 				content = "$".repeat(content);
 			}
 		}
@@ -249,7 +249,7 @@ const uint_cmp = (a, b) => {
 };
 
 const uint_sub = uint_fn((a, b) => {
-	if(uint_cmp(a.buffer, b.buffer) < 0) throw new Error;
+	if(uint_cmp(a.buffer, b.buffer) < 0) throw new RangeError("The subtrahend is greater than the minuend.");
 	a = new Uint8Array(a);
 	a.forEach((_, i) => (a[i] -= b[i] || 0) < 0 && a.subarray(i + 1).every((_, j) => (a[i + j + 1] -= 1) < 0));
 	return a;
@@ -304,14 +304,14 @@ const utf82str = utf8 => {
 			continue;
 		}
 		const length = byte.toString(2).indexOf("0");
-		if(length < 2 || length > 6) throw new Error;
+		if(length < 2 || length > 6) throw new DOMError("Invalid encoding.");
 		let point = byte & (1 << 8 - length) - 1;
 		for(let j = length - 1; j; j -= 1){
 			i += 1;
-			if(i >= utf8.length || (utf8[i] & 0xc0) !== 0x80) throw new Error;
+			if(i >= utf8.length || (utf8[i] & 0xc0) !== 0x80) throw new DOMError("Invalid encoding.");
 			point = (point << 6) | utf8[i] & 0x3f;
 		}
-		if(point < (1 << 4 * length + 1)) throw new Error;
+		if(point < (1 << 4 * length + 1)) throw new DOMError("Invalid encoding.");
 		result += String.fromCodePoint(point);
 	};
 	return result;
@@ -325,7 +325,7 @@ const signals2code = (...signals) => {
 		if(a === end) return "\t ]";
 		const buffer = is_buffer(a);
 		if(buffer) return "%" + Array.from(new Uint8Array(buffer)).map(a => a.toString(16).padStart(2, "0")).join("");
-		if(typeof a !== "string") throw new Error;
+		if(typeof a !== "string") throw new TypeError("Unsupported type.");
 		if(/^\$*$/u.test(a)) return "$" + a.length;
 		return /^\\|^%|^\$\d|[[\s\]]/u.test(a) ? "`" + a
 		.replace(/\\(?:[0-9A-Fa-f]+;|[nrt])|`/gu, "\\$&")
