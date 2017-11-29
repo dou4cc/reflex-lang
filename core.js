@@ -147,7 +147,6 @@ const is_buffer = a => {
 		Reflect.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get.call(a);
 		return new Int8Array(a).buffer;
 	}catch(error){}
-	return false;
 };
 
 const buffer2bin = buffer => Array.from(new Uint8Array(buffer)).map(a => String.fromCodePoint(a)).join("");
@@ -257,17 +256,37 @@ const uint_sub = uint_fn((a, b) => {
 });
 
 const same_lists = (...lists) => {
-	if(!Array.isArray(lists[0])) return lists.splice(1).every(a => lists.includes(a) || indexedDB.cmp(is_buffer(...lists), is_buffer(a) || 0));
+	if(!Array.isArray(lists[0])) return lists.splice(1).every(a => {
+		const [buffer0, buffer1] = lists.concat([a]).map(is_buffer);
+		return lists.includes(a) || buffer0 && buffer1 && buffer2bin(buffer0) === buffer2bin(buffer1);
+	});
 	return lists.slice(1).every(a => Array.isArray(a) && a.length === lists[0].length) && lists[0].every((_, i) => same_lists(...lists.map(list => list[i])));
 };
 
 const stdvm = () => {
+	const define_fn = (...path) => {
+		const f = path.pop();
+		return vm0.on([path], (args, ...rest) => {
+			if(rest.length) return;
+			try{
+				args = [path.concat(args), ...f(...args)];
+			}catch(error){}
+			vm0.emit(args);
+		});
+	};
 	const vm0 = vm();
-	vm0.on([["same"]], (args, ...rest) => rest.length || Array.isArray(args) && vm0.emit([["same", ...args], same_lists(...args).toString()]));
-	vm0.on([["concat"]], (args, ...rest) => rest.length || Array.isArray(args) && vm0.emit([["concat", ...args], args.every(is_buffer) ? new Uint8Array([].concat(...args.map(a => new Uint8Array(a)))).buffer : [].concat(...args.map(a => {
+	define_fn("=", (...args) => [same_lists(...arg).toString()]);
+	define_fn("&", (...args) => args.every(is_buffer) ? new Uint8Array([].concat(...args.map(a => new Uint8Array(a)))).buffer : [].concat(...args.map(a => {
 		const list = Array.from(a);
 		return list.length ? list : a;
-	}))]));
+	})));
+	define_fn("bin", "&", (...bins) => bins.every(is_buffer) && [bins.reduce((s, a) => buffer_and(s, a))]);
+	define_fn("bin", "|", (...bins) => bins.every(is_buffer) && [bins.reduce((s, a) => buffer_or(s, a))]);
+	define_fn("bin", "^", (...bins) => bins.every(is_buffer) && [bins.reduce((s, a) => buffer_xor(s, a))]);
+	define_fn("uint", "shorten", (...uints) => uints.every(is_buffer) && uints.map(uint_shorten));
+	define_fn("uint", "=", (...uints) => uints.every(is_buffer) && [same_lists(...uints.map(uint_shorten)).toString()]);
+	define_fn("uint", "+", (...uints) => uints.every(is_buffer) && [uints.reduce((s, a) => uint_add(s, a))]);
+	define_fn("uint", "-", (...uints) => uints.every(is_buffer) && [uints.reduce((s, a) => uint_sub(s, a))]);
 	vm0.emit(
 		["on", ["true", [""], ""], "$"],
 		["on", ["false", [""], ""], "$$"],
