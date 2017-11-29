@@ -37,7 +37,7 @@ const uint_shorten = buffer_fn(a => {
 });
 
 const num2uint = number => {
-	if(!Number.isSafeInteger(number) || number < 0) throw new TypeError("Cannot convert a non-natural or unsafe number to a uint.");
+	if(!Number.isSafeInteger(number) || number < 0) throw new TypeError("Cannot convert a unnatural or unsafe number to a uint.");
 	const result = new Uint8Array(8);
 	for(let i = 0; number >= 1; i += 1){
 		result[i] = number % 0xff;
