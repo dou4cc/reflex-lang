@@ -304,14 +304,14 @@ const utf82str = utf8 => {
 			continue;
 		}
 		const length = byte.toString(2).indexOf("0");
-		if(length < 2 || length > 6) throw new DOMError("Invalid encoding");
+		if(length < 2 || length > 6) throw new ReferenceError("Invalid encoding");
 		let point = byte & (1 << 8 - length) - 1;
 		for(let j = length - 1; j; j -= 1){
 			i += 1;
-			if(i >= utf8.length || (utf8[i] & 0xc0) !== 0x80) throw new DOMError("Invalid encoding");
+			if(i >= utf8.length || (utf8[i] & 0xc0) !== 0x80) throw new ReferenceError("Invalid encoding");
 			point = (point << 6) | utf8[i] & 0x3f;
 		}
-		if(point < (1 << 4 * length + 1)) throw new DOMError("Invalid encoding");
+		if(point < (1 << 4 * length + 1)) throw new ReferenceError("Invalid encoding");
 		result += String.fromCodePoint(point);
 	};
 	return result;
