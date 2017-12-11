@@ -88,7 +88,7 @@ const reflex = free => {
 			list = path.concat(list);
 			const listeners1 = Array.from(listeners);
 			if(list.length) (children.get(list[0]) || {emit(){}}).emit(...list.slice(1));
-			listeners1.forEach(f => listeners.has(f) && f(...list));
+			listeners1.reverse().forEach(f => listeners.has(f) && f(...list));
 		},
 		on: (...rest) => {
 			let first = (rest = path.concat(rest)).shift();
@@ -353,15 +353,22 @@ const stdvm = () => {
 		[on [def $0 $0] [on [$1] [$1 $2]]]
 		[on [undef $0 $0] [off [$1] [$1 $2]]]
 		[on [call $0 $0]
-			[on [temp call $1 $3]
+			[on [_ call $1 $3]
 				[emit [off $3]]
 				$2
 			]
 			[on [$1 $3 $3] [emit
 				[off $3]
-				[temp call $1 $4 $5]
+				[_ call $1 $4 $5]
 			]]
 			[emit [$1]]
+		]
+		[on [let $0 $0]
+			[on [_ on $1 $3]
+				[emit [off $3]]
+				$2
+			]
+			[emit [_ let $1]]
 		]
 	`);
 	return vm0;
