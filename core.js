@@ -303,7 +303,7 @@ const same_lists = (...lists) => {
 };
 
 const stdvm = () => {
-	const define_fn = (...path) => {
+	const defn = (...path) => {
 		const f = path.pop();
 		return vm0.on([path], (args, ...rest) => {
 			if(rest.length) return;
@@ -316,26 +316,36 @@ const stdvm = () => {
 		});
 	};
 	const vm0 = vm();
-	define_fn("=", (...args) => [same_lists(...arg).toString()]);
-	define_fn("&", (...args) => args.every(is_buffer) ? new Uint8Array([].concat(...args.map(a => new Uint8Array(a)))).buffer : [].concat(...args.map(a => {
+	defn("=", (...args) => [same_lists(...arg).toString()]);
+	defn("&", (...args) => args.every(is_buffer) ? new Uint8Array([].concat(...args.map(a => new Uint8Array(a)))).buffer : [].concat(...args.map(a => {
 		const list = Array.from(a);
 		return list.length ? list : a;
 	})));
 
-	define_fn("bin", "&", (...bins) => bins.every(is_buffer) && [bins.reduce((s, a) => buffer_and(s, a))]);
-	define_fn("bin", "|", (...bins) => bins.every(is_buffer) && [bins.reduce((s, a) => buffer_or(s, a))]);
-	define_fn("bin", "^", (...bins) => bins.every(is_buffer) && [bins.reduce((s, a) => buffer_xor(s, a))]);
+	const buffer_defn = (...path) => {
+		const f = path.pop();
+		return defn(...path, (...buffers) => buffers.every(is_buffer) && f(...buffers));
+	};
 
+	const bin_defn = (...path) => {
+		const f = path.pop();
+		return buffer_defn("bin", ...path, (...bins) => [bins.reduce((s, a) => f(s, a))]);
+	};
+	bin_defn("&", buffer_and);
+	bin_defn("|", buffer_or);
+	bin_defn("^", buffer_xor);
+
+	const uint_defn = (...path) => buffer_defn("uint", ...path);
 	let uint_iota = new ArrayBuffer;
 	const uint_atom = num2uint(1);
-	define_fn("uint", "shorten", (...uints) => uints.every(is_buffer) && uints.map(uint_shorten));
-	define_fn("uint", "=", (...uints) => uints.every(is_buffer) && [same_lists(...uints.map(uint_shorten)).toString()]);
-	define_fn("uint", "+", (...uints) => uints.every(is_buffer) && [uints.reduce((s, a) => uint_add(s, a))]);
-	define_fn("uint", "-", (...uints) => uints.every(is_buffer) && [uints.reduce((s, a) => uint_sub(s, a))]);
-	define_fn("uint", "*", (...uints) => uints.every(is_buffer) && [uints.reduce((s, a) => uint_mul(s, a))]);
-	define_fn("uint", "/", (...uints) => uints.length === 2 && uints.every(is_buffer) && uint_div(...uints));
-	define_fn("uint", "cmp", (...uints) => uints.length === 2 && uints.every(is_buffer) && [num2uint(uint_cmp(...uints))]);
-	define_fn("uint", "iota", (...args) => args.length || (uint_iota = uint_add(uint_iota, uint_atom)));
+	uint_defn("shorten", (...uints) => uints.map(uint_shorten));
+	uint_defn("=", (...uints) => [same_lists(...uints.map(uint_shorten)).toString()]);
+	uint_defn("+", (...uints) => [uints.reduce((s, a) => uint_add(s, a))]);
+	uint_defn("-", (...uints) => [uints.reduce((s, a) => uint_sub(s, a))]);
+	uint_defn("*", (...uints) => [uints.reduce((s, a) => uint_mul(s, a))]);
+	uint_defn("/", (...uints) => uints.length === 2 && uint_div(...uints));
+	uint_defn("cmp", (...uints) => uints.length === 2 && [num2uint(uint_cmp(...uints))]);
+	uint_defn("iota", (...args) => args.length || (uint_iota = uint_add(uint_iota, uint_atom)));
 
 	vm0.exec(`
 		[on [true [$0] $0] [emit $1]]
