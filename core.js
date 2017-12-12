@@ -86,9 +86,9 @@ const reflex = free => {
 	const f = path => ({
 		emit: (...list) => {
 			list = path.concat(list);
-			const listeners1 = Array.from(listeners);
+			const listeners1 = Array.from(listeners).reverse();
 			if(list.length) (children.get(list[0]) || {emit(){}}).emit(...list.slice(1));
-			listeners1.reverse().forEach(f => listeners.has(f) && f(...list));
+			listeners1.forEach(f => listeners.has(f) && f(...list));
 		},
 		on: (...rest) => {
 			let first = (rest = path.concat(rest)).shift();
@@ -322,53 +322,46 @@ const stdvm = () => {
 		return list.length ? list : a;
 	})));
 
-	const buffer_defn = (...path) => {
+	const defn_bin = (...path) => {
 		const f = path.pop();
-		return defn(...path, (...buffers) => buffers.every(is_buffer) && f(...buffers));
+		return defn(...path, (...bins) => bins.every(is_buffer) && f(...bins));
 	};
 
-	const bin_defn = (...path) => {
-		const f = path.pop();
-		return buffer_defn("bin", ...path, (...bins) => [bins.reduce((s, a) => f(s, a))]);
-	};
-	bin_defn("&", buffer_and);
-	bin_defn("|", buffer_or);
-	bin_defn("^", buffer_xor);
+	defn_bin("bin", "&", (...bins) => [bins.reduce(buffer_and)]);
+	defn_bin("bin", "|", (...bins) => [bins.reduce(buffer_or)]);
+	defn_bin("bin", "^", (...bins) => [bins.reduce(buffer_xor)]);
 
-	const uint_defn = (...path) => buffer_defn("uint", ...path);
 	let uint_iota = new ArrayBuffer;
 	const uint_atom = num2uint(1);
-	uint_defn("shorten", (...uints) => uints.map(uint_shorten));
-	uint_defn("=", (...uints) => [same_lists(...uints.map(uint_shorten)).toString()]);
-	uint_defn("+", (...uints) => [uints.reduce((s, a) => uint_add(s, a))]);
-	uint_defn("-", (...uints) => [uints.reduce((s, a) => uint_sub(s, a))]);
-	uint_defn("*", (...uints) => [uints.reduce((s, a) => uint_mul(s, a))]);
-	uint_defn("/", (...uints) => uints.length === 2 && uint_div(...uints));
-	uint_defn("cmp", (...uints) => uints.length === 2 && [num2uint(uint_cmp(...uints))]);
-	uint_defn("iota", (...args) => args.length || (uint_iota = uint_add(uint_iota, uint_atom)));
+	defn_bin("uint", "shorten", (...uints) => uints.map(uint_shorten));
+	defn_bin("uint", "=", (...uints) => [same_lists(...uints.map(uint_shorten)).toString()]);
+	defn_bin("uint", "+", (...uints) => [uints.reduce(uint_add)]);
+	defn_bin("uint", "-", (...uints) => [uints.reduce(uint_sub)]);
+	defn_bin("uint", "*", (...uints) => [uints.reduce(uint_mul)]);
+	defn_bin("uint", "/", (...uints) => uints.length === 2 && uint_div(...uints));
+	defn_bin("uint", "cmp", (...uints) => uints.length === 2 && [num2uint(uint_cmp(...uints))]);
+	defn_bin("uint", "iota", (...args) => args.length || (uint_iota = uint_add(uint_iota, uint_atom)));
 
 	vm0.exec(`
 		[on [true [$0] $0] [emit $1]]
 		[on [false [$0] $0] [emit $2]]
 		[on [def $0 $0] [on [$1] [$1 $2]]]
 		[on [undef $0 $0] [off [$1] [$1 $2]]]
-		[on [call $0 $0]
-			[on [_ call $1 $3]
-				[emit [off $3]]
-				$2
-			]
-			[on [$1 $3 $3] [emit
-				[off $3]
-				[_ call $1 $4 $5]
-			]]
-			[emit [$1]]
+		[on [once $0 $0] [emit [on $1
+			[emit [off $3]]
+			$2
+		]]]
+		[on [unonce $0 $0] [emit [off $1
+			[emit [off $3]]
+			$2
+		]]]
+		[on [let [$0] $0]
+			[once [_ let [$1] $3] $2]
+			[emit [_ let [$1] $1]]
 		]
-		[on [let $0 $0]
-			[on [_ on $1 $3]
-				[emit [off $3]]
-				$2
-			]
-			[emit [_ let $1]]
+		[on [call $0 $0]
+			[once [$1 $3 $3] [emit [let [$4 $5] $2]]]
+			[emit [$1]]
 		]
 	`);
 	return vm0;
