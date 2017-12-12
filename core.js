@@ -60,15 +60,15 @@ const ast2signals = source => {
 				if(!(content.length % 2)) throw new SyntaxError("Invalid token");
 				content = content.slice(1);
 				list[i] = new Uint8Array(content.length / 2).map((a, i) => {
-					a = Number.parseInt(content.substr(i * 2, 2), 16);
-					if(Number.isNaN(a)) throw new SyntaxError("Invalid token");
+					a = content.substr(i * 2, 2);
+					if(a.length !== (a = Number.parseInt(a, 16)).toString(16).length || Number.isNaN(a)) throw new SyntaxError("Invalid token");
 					return a;
 				}).buffer;
 				continue;
 			}
 			if(/^\$\d/u.test(content)){
-				content = +content.slice(1);
-				if(Number.isNaN(content)) throw new SyntaxError("Invalid token");
+				content = content.slice(1);
+				if(content !== (content = Number.parseInt(content, 10)).toString(10) || Number.isNaN(content)) throw new SyntaxError("Invalid token");
 				content = "$".repeat(content);
 			}
 		}
@@ -303,6 +303,10 @@ const same_lists = (...lists) => {
 };
 
 const stdvm = () => {
+	const vm0 = vm();
+
+	vm0.on(["defer"], (...signals) => setTimeout(() => vm0.emit(...signals)));
+
 	const defn = (...path) => {
 		const f = path.pop();
 		return vm0.on([path], (args, ...rest) => {
@@ -315,7 +319,6 @@ const stdvm = () => {
 			if(args.length > 1) vm0.emit(args);
 		});
 	};
-	const vm0 = vm();
 	defn("=", (...args) => [same_lists(...arg).toString()]);
 	defn("&", (...args) => args.every(is_buffer) ? new Uint8Array([].concat(...args.map(a => new Uint8Array(a)))).buffer : [].concat(...args.map(a => {
 		const list = Array.from(a);
@@ -343,10 +346,10 @@ const stdvm = () => {
 	defn_bin("uint", "iota", (...args) => args.length || (uint_iota = uint_add(uint_iota, uint_atom)));
 
 	vm0.exec(`
-		[on [true [$0] $0] [emit $1]]
-		[on [false [$0] $0] [emit $2]]
 		[on [def $0 $0] [on [$1] [$1 $2]]]
 		[on [undef $0 $0] [off [$1] [$1 $2]]]
+		[on [[true [$0] $0]] [emit [[true [$1] $2] $1]]]
+		[on [[false [$0] $0]] [emit [[false [$1] $2] $2]]]
 		[on [once $0 $0] [emit [on $1
 			[emit [off $3]]
 			$2
@@ -355,9 +358,10 @@ const stdvm = () => {
 			[emit [off $3]]
 			$2
 		]]]
+		[on [[list $0]] [emit [[list $1] $1]]]
 		[on [let [$0] $0]
-			[once [_ let [$1] $3] $2]
-			[emit [_ let [$1] $1]]
+			[once [[list $1] $3] $2]
+			[emit [[list $1]]]
 		]
 		[on [call $0 $0]
 			[once [$1 $3 $3] [emit [let [$4 $5] $2]]]
