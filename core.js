@@ -47,8 +47,8 @@ const num2uint = number => {
 };
 
 const ast2signals = source => {
-	const str2intnum = (a, radix = 10) => {
-		if(a.length !== (a = Number.parseInt(a, radix)).toString(radix).length || Number.isNaN(a)) throw new SyntaxError("Invalid token");
+	const str2int = (a, radix = 10) => {
+		if(a.toLowerCase() !== (a = Number.parseInt(a, radix)).toString(radix) || Number.isNaN(a)) throw new SyntaxError("Invalid token");
 		return a;
 	};
 	const [begin, end, ...list] = flatten(...source);
@@ -57,16 +57,16 @@ const ast2signals = source => {
 		let {content} = list[i];
 		if(!list[i].flag){
 			if(/^\\/u.test(content)){
-				list[i] = num2uint(+content.slice(1));
+				list[i] = num2uint(str2int(content.slice(1)));
 				continue;
 			}
 			if(/^%/u.test(content)){
 				if(!(content.length % 2)) throw new SyntaxError("Invalid token");
 				content = content.slice(1);
-				list[i] = new Uint8Array(content.length / 2).map((a, i) => str2intnum(content.substr(i * 2, 2).slice(content[i * 2] === "0"), 16)).buffer;
+				list[i] = new Uint8Array(content.length / 2).map((a, i) => str2int(content.substr(i * 2, 2).slice(content[i * 2] === "0"), 16)).buffer;
 				continue;
 			}
-			if(/^\$\d/u.test(content)) content = "$".repeat(str2intnum(content.slice(1)));
+			if(/^\$\d/u.test(content)) content = "$".repeat(str2int(content.slice(1)));
 		}
 		list[i] = content;
 	}
@@ -301,7 +301,9 @@ const same_lists = (...lists) => {
 const stdvm = () => {
 	const vm0 = vm();
 
-	vm0.on(["defer"], (...signals) => setTimeout(() => vm0.emit(...signals)));
+	vm0.on(["defer"], (...signals) => Promise.resolve().then(() => vm0.emit(...signals)).catch(error => setTimeout(() => {
+		throw error;
+	})));
 
 	const defn = (...path) => {
 		const f = path.pop();
@@ -399,8 +401,7 @@ const signals2code = (options = {}) => (...signals) => {
 		const buffer = is_buffer(a);
 		if(buffer){
 			if(options.utf8_to_str) try{
-				const string = utf8_to_str(buffer);
-				if(!/[\0-\u{1f}\u{7f}]/u.test(string)) a = string;
+				a = utf8_to_str(buffer);
 			}catch(error){}
 			if(typeof a !== "string") return "%" + Array.from(new Uint8Array(buffer)).map(a => a.toString(16).padStart(2, "0")).join("");
 		}
