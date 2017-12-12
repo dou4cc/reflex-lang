@@ -47,6 +47,10 @@ const num2uint = number => {
 };
 
 const ast2signals = source => {
+	const str2intnum = (a, radix = 10) => {
+		if(a.length !== (a = Number.parseInt(a, radix)).toString(radix).length || Number.isNaN(a)) throw new SyntaxError("Invalid token");
+		return a;
+	};
 	const [begin, end, ...list] = flatten(...source);
 	for(let i in list){
 		if(typeof list[i] !== "object") continue;
@@ -59,18 +63,10 @@ const ast2signals = source => {
 			if(/^%/u.test(content)){
 				if(!(content.length % 2)) throw new SyntaxError("Invalid token");
 				content = content.slice(1);
-				list[i] = new Uint8Array(content.length / 2).map((a, i) => {
-					a = content.substr(i * 2, 2);
-					if(a.length !== (a = Number.parseInt(a, 16)).toString(16).length || Number.isNaN(a)) throw new SyntaxError("Invalid token");
-					return a;
-				}).buffer;
+				list[i] = new Uint8Array(content.length / 2).map((a, i) => str2intnum(content.substr(i * 2, 2).slice(content[i * 2] === "0"), 16)).buffer;
 				continue;
 			}
-			if(/^\$\d/u.test(content)){
-				content = content.slice(1);
-				if(content !== (content = Number.parseInt(content, 10)).toString(10) || Number.isNaN(content)) throw new SyntaxError("Invalid token");
-				content = "$".repeat(content);
-			}
+			if(/^\$\d/u.test(content)) content = "$".repeat(str2intnum(content.slice(1)));
 		}
 		list[i] = content;
 	}
