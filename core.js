@@ -352,17 +352,16 @@ const stdvm = () => {
 		[on [[true [$0] $0]] [emit [[true [$1] $2] $1]]]
 		[on [[false [$0] $0]] [emit [[false [$1] $2] $2]]]
 		[on [once $0 $0] [emit [on $1
-			[emit [off $3]]
+			[emit [off $4]]
 			$2
 		]]]
 		[on [unonce $0 $0] [emit [off $1
-			[emit [off $3]]
+			[emit [off $4]]
 			$2
 		]]]
-		[on [[list $0]] [emit [[list $1] $1]]]
 		[on [let [$0] $0]
-			[once [[list $1] $3] $2]
-			[emit [[list $1]]]
+			[once [_ let [$1] $3] $2]
+			[emit [_ let [$1] $1]]
 		]
 		[on [call $0 $0]
 			[once [$1 $3 $3] [emit [let [$4 $5] $2]]]
