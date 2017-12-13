@@ -37,7 +37,7 @@ const uint_shorten = buffer_fn(a => {
 });
 
 const num2uint = number => {
-	if(!Number.isSafeInteger(number) || number < 0) throw new TypeError("Only safe natural number can be converted to uint.");
+	if(!Number.isSafeInteger(number) || number < 0) throw TypeError("Only safe natural number can be converted to uint.");
 	const result = new Uint8Array(8);
 	for(let i = 0; number >= 1; i += 1){
 		result[i] = number % 0xff;
@@ -47,7 +47,7 @@ const num2uint = number => {
 };
 
 const str2num = (a, radix = 10) => {
-	if(a.toLowerCase() !== (a = Number.parseInt(a, radix)).toString(radix) || Number.isNaN(a)) throw new SyntaxError("Invalid token");
+	if(a.toLowerCase() !== (a = Number.parseInt(a, radix)).toString(radix) || Number.isNaN(a)) throw SyntaxError("Invalid token");
 	return a;
 };
 
@@ -62,7 +62,7 @@ const ast2signals = source => {
 				continue;
 			}
 			if(/^%/u.test(content)){
-				if(!(content.length % 2)) throw new SyntaxError("Invalid token");
+				if(!(content.length % 2)) throw SyntaxError("Invalid token");
 				content = content.slice(1);
 				list[i] = new Uint8Array(content.length / 2).map((a, i) => str2num(content.substr(i * 2, 2).slice(content[i * 2] === "0"), 16)).buffer;
 				continue;
@@ -159,6 +159,8 @@ const str2bin = string => buffer2bin(str2utf8(string));
 
 const bin2buffer = binary => new Uint8Array(Array.from(binary).map(a => a.codePointAt())).buffer;
 
+const is_token = a => typeof a === "string" && /^\$*$/u.test(a);
+
 const vm = () => {
 	const flatten1 = (...list) => {
 		const [begin1, end1] = [, , ...list] = flatten(...list);
@@ -178,10 +180,9 @@ const vm = () => {
 	};
 	const emit0 = (...signals) => signals.forEach(signal => reflex0.emit(...encode(signal)));
 	const emit1 = (reflex, ...list) => unflatten1(...list).forEach(signal => reflex.emit(...flatten1(signal)));
-	const is_token = a => typeof a === "string" && /^\$*$/u.test(a);
 	const escape = list => list.map(a => is_token(a) ? "$" + a : a);
 	const unescape = list => list.map(a => {
-		if(a === "") throw new ReferenceError("Invalid encoding");
+		if(a === "") throw SyntaxError("Invalid encoding");
 		return is_token(a) ? a.slice(1) : a;
 	});
 	const begin = Symbol();
@@ -256,7 +257,7 @@ const uint_cmp = (a, b) => {
 };
 
 const uint_sub = uint_fn((a, b) => {
-	if(uint_cmp(a.buffer, b.buffer) < 0) throw new RangeError("The subtrahend is greater than the minuend.");
+	if(uint_cmp(a.buffer, b.buffer) < 0) throw RangeError("The subtrahend is greater than the minuend.");
 	a = new Uint8Array(a);
 	a.forEach((_, i) => (a[i] -= b[i] || 0) < 0 && a.subarray(i + 1).every((_, j) => (a[i + j + 1] -= 1) < 0));
 	return a;
@@ -277,18 +278,19 @@ const uint_mul = uint_fn((a, b) => {
 	return new Uint8Array(result);
 });
 
-const uint_div = (a, b) => {
-	[a, b] = [a, b].map(a => new Uint8Array(uint_shorten(a)));
-	if(!b.length) throw new ReferenceError("The divisor cannot be 0.");
-	if(a.length < b.length) return [new ArrayBuffer, a.buffer];
+const uint_div = uint_fn((a, b) => {
+	if(!b.length) throw ReferenceError("The divisor cannot be 0.");
+	if(a.length < b.length) return new Uint8Array;
 	let result = new ArrayBuffer;
 	for(let i = a.length - b.length + 1; i; i -= 1){
 		const step = new Uint8Array(i);
 		step.subarray(-1)[0] = 1;
 		for(let j = 1; j < 0xff && uint_cmp(uint_mul(uint_add(result, step.buffer), b.buffer), a.buffer) <= 0; j += 1) result = uint_add(result, step.buffer);
 	}
-	return [uint_shorten(result.buffer), uint_sub(a.buffer, uint_mul(result.buffer, b.buffer))];
-};
+	return new Uint8Array(result);
+});
+
+const uint_mod = (a, b) => uint_sub(a, uint_mul(uint_div(a, b), b));
 
 const same_lists = (...lists) => {
 	if(Array.isArray(lists[0])) return lists.slice(1).every(a => Array.isArray(a) && a.length === lists[0].length) && lists[0].every((_, i) => same_lists(...lists.map(list => list[i])));
@@ -340,7 +342,7 @@ const stdvm = () => {
 	defn_bin("uint", "+", (...uints) => [uints.reduce(uint_add)]);
 	defn_bin("uint", "-", (...uints) => [uints.reduce(uint_sub)]);
 	defn_bin("uint", "*", (...uints) => [uints.reduce(uint_mul)]);
-	defn_bin("uint", "/", (...uints) => uints.length === 2 && uint_div(...uints));
+	defn_bin("uint", "/", (...uints) => uints.length === 2 && [uint_div(...uints), uint_mod(...uints)]);
 	defn_bin("uint", "cmp", (...uints) => uints.length === 2 && [num2uint(uint_cmp(...uints))]);
 	defn_bin("uint", "iota", (...args) => args.length || (uint_iota = uint_add(uint_iota, uint_atom)));
 
@@ -380,14 +382,14 @@ const utf8_to_str = utf8 => {
 			continue;
 		}
 		const length = byte.toString(2).indexOf("0");
-		if(length < 2 || length > 6) throw new ReferenceError("Invalid encoding");
+		if(length < 2 || length > 6) throw SyntaxError("Invalid encoding");
 		let point = byte & (1 << 8 - length) - 1;
 		for(let j = length - 1; j; j -= 1){
 			i += 1;
-			if(i >= utf8.length || (utf8[i] & 0xc0) !== 0x80) throw new ReferenceError("Invalid encoding");
+			if(i >= utf8.length || (utf8[i] & 0xc0) !== 0x80) throw SyntaxError("Invalid encoding");
 			point = (point << 6) | utf8[i] & 0x3f;
 		}
-		if(point < (1 << 4 * length + 1)) throw new ReferenceError("Invalid encoding");
+		if(point < (1 << 4 * length + 1)) throw SyntaxError("Invalid encoding");
 		result += String.fromCodePoint(point);
 	};
 	return result;
@@ -401,13 +403,15 @@ const signals2code = (options = {}) => (...signals) => {
 		if(a === end) return "\t ]";
 		const buffer = is_buffer(a);
 		if(buffer){
-			if(options.utf8_to_str) try{
-				a = utf8_to_str(buffer);
+			try{
+				if(options.utf8_to_str) throw a = utf8_to_str(buffer);
 			}catch(error){}
 			if(typeof a !== "string") return "%" + Array.from(new Uint8Array(buffer)).map(a => a.toString(16).padStart(2, "0")).join("");
 		}
-		if(typeof a !== "string") throw new TypeError("Unsupported type");
-		if(/^\$*$/u.test(a) && str2num(a.length.toString()) === a.length) return "$" + a.length;
+		if(typeof a !== "string") throw TypeError("Unsupported type");
+		if(is_token(a)) try{
+			if(str2num(a.length.toString()) === a.length) return "$" + a.length;
+		}catch(error){}
 		return /^\\|^%|^\$\d|[[;\s\0-\u{1f}\u{7f}\]]/u.test(a) ? "`" + a
 		.replace(/\\(?:[0-9A-Fa-f]+;|[nrt])|`/gu, "\\$&")
 		.replace(/[\n\r\t]/gu, $ => ({"\n": "\\n", "\r": "\\r", "\t": "\\t"})[$])
