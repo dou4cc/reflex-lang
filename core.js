@@ -402,8 +402,8 @@ const signals2code = (options = {}) => (...signals) => {
 		if(a === end) return "\t ]";
 		const buffer = is_buffer(a);
 		if(buffer){
-			try{
-				if(options.utf8_to_str) throw a = utf8_to_str(buffer);
+			if(options.utf8_to_str) try{
+				a = utf8_to_str(buffer);
 			}catch(error){}
 			if(typeof a !== "string") return "%" + Array.from(new Uint8Array(buffer)).map(a => a.toString(16).padStart(2, "0")).join("");
 		}
