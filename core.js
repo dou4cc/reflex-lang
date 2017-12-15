@@ -30,20 +30,14 @@ const code2ast = source => {
 
 const buffer_fn = f => (...args) => f(...args.map(a => new Uint8Array(a))).buffer;
 
-const uint_shorten = buffer_fn(a => {
-	let i = a.length;
-	while(!a[i - 1] && i >= 0) i -= 1;
-	return a.slice(0, i);
-});
-
 const num2uint = number => {
 	if(!Number.isSafeInteger(number) || number < 0) throw TypeError("Only safe natural number can be converted to uint.");
-	const result = new Uint8Array(8);
-	for(let i = 0; number >= 1; i += 1){
-		result[i] = number % 0xff;
+	const result = [];
+	while(number >= 1){
+		result.push(number % 0xff);
 		number /= 0xff;
 	}
-	return uint_shorten(result.buffer);
+	return new Uint8Array(result).buffer;
 };
 
 const str2num = (a, radix = 10) => {
@@ -64,7 +58,7 @@ const ast2signals = source => {
 			if(/^%/u.test(content)){
 				if(!(content.length % 2)) throw SyntaxError("Invalid token");
 				content = content.slice(1);
-				list[i] = new Uint8Array(content.length / 2).map((a, i) => str2num(content.substr(i * 2, 2).slice(content[i * 2] === "0"), 16)).buffer;
+				list[i] = new Uint8Array(content.length / 2).map((a, i) => str2num(content.substr(i * 2, 2).replace(/^0*/u, ""), 16)).buffer;
 				continue;
 			}
 			if(/^\$\d/u.test(content)) content = "$".repeat(str2num(content.slice(1)));
@@ -140,7 +134,7 @@ const multi_key_map = () => {
 const is_buffer = a => {
 	try{
 		Reflect.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get.call(a);
-		return new Int8Array(a).buffer;
+		return new Uint8Array(a).buffer;
 	}catch(error){}
 };
 
@@ -159,7 +153,9 @@ const str2bin = string => buffer2bin(str2utf8(string));
 
 const bin2buffer = binary => new Uint8Array(Array.from(binary).map(a => a.codePointAt())).buffer;
 
-const is_token = a => typeof a === "string" && /^\$*$/u.test(a);
+const is_str = a => typeof a === "string";
+
+const is_token = a => is_str(a) && /^\$*$/u.test(a);
 
 const vm = () => {
 	const flatten1 = (...list) => {
@@ -169,9 +165,9 @@ const vm = () => {
 	const unflatten1 = (...list) => unflatten(begin, end, ...list);
 	const encode = (...list) => flatten1(...list).map(a => {
 		const buffer = is_buffer(a);
-		return buffer ? buffer2bin(buffer) : typeof a === "string" ? str2bin(a) : a;
+		return buffer ? buffer2bin(buffer) : is_str(a) ? str2bin(a) : a;
 	});
-	const decode = (...list) => unflatten1(...list.map(a => typeof a === "string" ? bin2buffer(a) : a));
+	const decode = (...list) => unflatten1(...list.map(a => is_str(a) ? bin2buffer(a) : a));
 	const on = (path, listener) => {
 		if(!listener) return reflex0.on((...list) => path(...decode(...list)));
 		path = encode(path);
@@ -225,7 +221,7 @@ const vm = () => {
 		}
 		emit1(reflex0, ...list);
 	});
-	on([["escape"]], (args, ...rest) => rest.length || args.length && emit0([["escape", ...args], ...decode(...escape(encode(...args)))]));
+	on(["fn", ["escape"]], (args, ...rest) => rest.length || args.length && emit0(["fn", ["escape", ...args], ...decode(...escape(encode(...args)))]));
 	return {
 		on,
 		emit: emit0,
@@ -239,7 +235,13 @@ const buffer_or = buffer_fn((a, b) => new Uint8Array(Math.max(a.length, b.length
 
 const buffer_xor = buffer_fn((a, b) => new Uint8Array(Math.max(a.length, b.length)).map((_, i) => (a[i] || 0xff) ^ (b[i] || 0x00)));
 
-const uint_fn = f => (...args) => uint_shorten(f(...args.map(a => new Uint8Array(uint_shorten(a)))).buffer);
+const uint_trim = buffer_fn(a => {
+	let i = a.length;
+	while(!a[i - 1] && i) i -= 1;
+	return a.slice(0, i);
+});
+
+const uint_fn = f => (...args) => uint_trim(f(...args.map(a => new Uint8Array(uint_trim(a)))).buffer);
 
 const uint_add = uint_fn((a, b) => {
 	const result = new Uint8Array(Math.max(a.length, b.length) + 1);
@@ -252,8 +254,13 @@ const uint_add = uint_fn((a, b) => {
 });
 
 const uint_cmp = (a, b) => {
-	[a, b] = [a, b].map(a => new Uint8Array(uint_shorten(a)));
-	return a.length + b.length && Math.sign(a.length - b.length || a.subarray(-1)[0] - b.subarray(-1)[0]) || uint_cmp(...[a, b].map(a => a.slice(0, -1).buffer));
+	[a, b] = [a, b].map(a => new Uint8Array(uint_trim(a)));
+	if(a.length !== b.length) return Math.sign(a.length - b.length);
+	for(let i = a.length - 1; i >= 0; i -= 1){
+		const cmp = Math.sign(a[i] - b[i]);
+		if(cmp) return cmp;
+	}
+	return 0;
 };
 
 const uint_sub = uint_fn((a, b) => {
@@ -298,7 +305,15 @@ const same_lists = (...lists) => {
 		const [buffer0, buffer1] = lists.concat([a]).map(is_buffer);
 		return lists.includes(a) || buffer0 && buffer1 && buffer2bin(buffer0) === buffer2bin(buffer1);
 	});
-	
+};
+
+const uint2num = uint => {
+	uint = new Uint8Array(uint_trim(uint));
+	const length = Number.MAX_SAFE_INTEGER.toString(2).length;
+	if(uint.length > Math.ceil(length / 8) || uint.subarray(-1)[0] & ~((1 << length % 8) - 1)) throw RangeError("Not safe");
+	let result = 0;
+	uint.reverse().forEach(a => result = result * 0x100 + a);
+	return result;
 };
 
 const stdvm = () => {
@@ -310,10 +325,10 @@ const stdvm = () => {
 
 	const defn = (...path) => {
 		const f = path.pop();
-		return vm0.on([path], (args, ...rest) => {
+		return vm0.on(["fn", path], (args, ...rest) => {
 			if(rest.length) return;
 			try{
-				args = [path.concat(args), ...f(...args)];
+				args = ["fn", path.concat(args), ...f(...args)];
 			}catch(error){
 				return;
 			}
@@ -337,8 +352,8 @@ const stdvm = () => {
 
 	let uint_iota = new ArrayBuffer;
 	const uint_atom = num2uint(1);
-	defn_bin("uint", "shorten", (...uints) => uints.map(uint_shorten));
-	defn_bin("uint", "=", (...uints) => [same_lists(...uints.map(uint_shorten)).toString()]);
+	defn_bin("uint", "trim", (...uints) => uints.map(uint_trim));
+	defn_bin("uint", "=", (...uints) => [same_lists(...uints.map(uint_trim)).toString()]);
 	defn_bin("uint", "+", (...uints) => [uints.reduce(uint_add)]);
 	defn_bin("uint", "-", (...uints) => [uints.reduce(uint_sub)]);
 	defn_bin("uint", "*", (...uints) => [uints.reduce(uint_mul)]);
@@ -347,26 +362,8 @@ const stdvm = () => {
 	defn_bin("uint", "iota", (...args) => args.length || (uint_iota = uint_add(uint_iota, uint_atom)));
 
 	vm0.exec(`
-		[on [def $0 $0] [on [$1] [$1 $2]]]
-		[on [undef $0 $0] [off [$1] [$1 $2]]]
-		[on [[true [$0] $0]] [emit [[true [$1] $2] $1]]]
-		[on [[false [$0] $0]] [emit [[false [$1] $2] $2]]]
-		[on [once $0 $0] [emit [on $1
-			[emit [off $4]]
-			$2
-		]]]
-		[on [unonce $0 $0] [emit [off $1
-			[emit [off $4]]
-			$2
-		]]]
-		[on [let [$0] $0]
-			[once [_ let [$1] $3] $2]
-			[emit [_ let [$1] $1]]
-		]
-		[on [call $0 $0]
-			[once [$1 $3 $3] [emit [let [$4 $5] $2]]]
-			[emit [$1]]
-		]
+		[on [def $0 $0] [on [fn $1] [fn $1 $2]]]
+		[on [undef $0 $0] [off [fn $1] [fn $1 $2]]]
 	`);
 	return vm0;
 };
@@ -405,9 +402,9 @@ const signals2code = (options = {}) => (...signals) => {
 			if(options.utf8_to_str) try{
 				a = utf8_to_str(buffer);
 			}catch(error){}
-			if(typeof a !== "string") return "%" + Array.from(new Uint8Array(buffer)).map(a => a.toString(16).padStart(2, "0")).join("");
+			if(!is_str(a)) return "%" + Array.from(new Uint8Array(buffer)).map(a => a.toString(16).padStart(2, "0")).join("");
 		}
-		if(typeof a !== "string") throw TypeError("Unsupported type");
+		if(!is_str(a)) throw TypeError("Unsupported");
 		if(is_token(a)) try{
 			if(str2num(a.length.toString()) === a.length) return "$" + a.length;
 		}catch(error){}
@@ -420,7 +417,7 @@ const signals2code = (options = {}) => (...signals) => {
 	.replace(/ \t /gu, "");
 };
 
-stdvm;
+({vm, stdvm});
 
 /*test*
 var signals2code0 = signals2code({utf8_to_str: true});
