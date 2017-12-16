@@ -369,6 +369,18 @@ const stdvm = () => {
 		[on [def $0 $0] [on [fn $1] [fn $1 $2]]]
 
 		[on [undef $0 $0] [off [fn $1] [fn $1 $2]]]
+
+		[on [let $0 $0 $0]
+			[on [fn [esc $2 [$1 $3]] $4 [$4 $4]] [unesc
+				[off $4]
+				[on [_ let $6 $5] [unesc
+					[off $8]
+					$7
+				]]
+				[unesc [_ let $6 $5]]
+			]]
+			[unesc [fn [esc $2 [$1 $3]]]]
+		]
 	`);
 	return vm0;
 };
