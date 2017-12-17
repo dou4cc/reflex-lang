@@ -16,7 +16,7 @@ const unflatten = (begin, end, list) => {
 
 const code2ast = source => {
 	source = source.replace(/\r\n?/gu, "\n");
-	const words = source.match(/`(?:\\`|[^`])*`|[[\]]|(?:(?!\]|;)\S)+|;.*/gu);
+	const words = source.match(/`(?:\\`|[^`])*`|[[\]]|(?:(?![[;`\]])\S)+|;.*/gu);
 	return unflatten("[", "]", words.filter(a => !/^;/u.test(a)).map(a => {
 		if(/^[[\]]$/u.test(a)) return a;
 		if(/^`.*`$/u.test(a)) return {flag: "`", content:
@@ -186,7 +186,7 @@ const vm = () => {
 	const reflex0 = reflex();
 	const reflex1 = reflex();
 	const handles = multi_key_map();
-	reflex0.on(begin, "on", (...list) => {
+	reflex0.on(begin, "reflex", (...list) => {
 		const match = list => {
 			const f = (pattern, ...list) => {
 				if(pattern === "") return args.push(list);
@@ -203,16 +203,16 @@ const vm = () => {
 		const path = unescape(list1.slice(0, list1.concat("").indexOf("")));
 		handles.set(...list, [
 			reflex0.on(...path, (...args) => (args = match(args)) && emit1([].concat(...flatten1(...effects).map(a => is_token(a) ? a.length < args.length ? args[a.length] : a.slice(args.length) : a)))),
-			reflex1.on(...path, (...list1) => match(list1) && reflex0.emit(begin, "on", ...list)),
+			reflex1.on(...path, (...list1) => match(list1) && reflex0.emit(begin, "reflex", ...list)),
 		]);
 	});
-	reflex0.on(begin, "off", (...list) => {
+	reflex0.on(begin, "unreflex", (...list) => {
 		const handle = handles.get(...list);
 		if(!handle) return;
 		handle.forEach(f => f());
 		handles.set(...list, undefined);
 	});
-	reflex0.on(begin, "match", (...list) => emit1(list.slice(0, -1), reflex1));
+	reflex0.on(begin, "match-reflex", (...list) => emit1(list.slice(0, -1), reflex1));
 	reflex0.on(begin, "unesc", (...list) => {
 		try{
 			list = unescape(list.slice(0, -1));
@@ -362,24 +362,39 @@ const stdvm = () => {
 	defn_bin("uint", ">", (...uints) => [uints.slice(1).every((a, i) => uint_cmp(uints[i - 1], a) > 0).toString()]);
 	defn_bin("uint", "<=", (...uints) => [uints.slice(1).every((a, i) => uint_cmp(uints[i - 1], a) <= 0).toString()]);
 	defn_bin("uint", ">=", (...uints) => [uints.slice(1).every((a, i) => uint_cmp(uints[i - 1], a) >= 0).toString()]);
-	defn_bin("uint", "iota", (...args) => args.length || (uint_iota = uint_add(uint_iota, uint_atom)));
+	defn_bin("uint", "iota", (...args) => args.length || [uint_iota = uint_add(uint_iota, uint_atom)]);
 
 	vm0.exec(`
-		[on [def $0 $0] [on [fn $1] [fn $1 $2]]]
+		[reflex [def $0 $0] [reflex [fn $1] [fn $1 $2]]]
 
-		[on [undef $0 $0] [off [fn $1] [fn $1 $2]]]
+		[reflex [undef $0 $0] [unreflex [fn $1] [fn $1 $2]]]
 
-		[on [let $0 $0 $0]
-			[on [fn [esc $2 [$1 $3]] $4 [$4 $4]] [unesc
-				[off $4]
-				[on [_ let $6 $5] [unesc
-					[off $9]
+		[reflex [let $0 $0 $0]
+			[reflex [fn [esc $2 [$1 $3]] $4 [$4 $4]] [unesc
+				[unreflex $4]
+				[reflex [fn [esc $6 _] $5 _] [unesc
+					[unreflex $9]
 					$7
 				]]
-				[unesc [_ let $6 $6]]
+				[unesc [fn [esc $6 _]]]
 			]]
 			[unesc [fn [esc $2 [$1 $3]]]]
 		]
+
+		[reflex [on $0 $0]
+			[reflex [fn [esc [$1 $2]] $3] [unesc
+				[unreflex $3]
+				[reflex
+			]]
+			[unesc [fn [esc [$1 $2]]]]
+		]
+
+		[reflex [on $0 $0] [unesc
+			[let [[$2] $1 $1 $2] [[$3] $3 $3]
+				[reflex $4
+					
+			]
+		]]
 	`);
 	return vm0;
 };
@@ -424,7 +439,7 @@ const signals2code = (options = {}) => (...signals) => {
 		if(is_token(a)) try{
 			if(str2num(a.length.toString()) === a.length) return "$" + a.length;
 		}catch(error){}
-		return /^\\|^%|^\$\d|[[;\s\0-\u{1f}\u{7f}\]]/u.test(a) ? "`" + a
+		return /^\\|^%|^\$\d|[[;`\s\0-\u{1f}\u{7f}\]]/u.test(a) ? "`" + a
 		.replace(/\\(?:[0-9A-Fa-f]+;|[nrt])|`/gu, "\\$&")
 		.replace(/[\n\r\t]/gu, $ => ({"\n": "\\n", "\r": "\\r", "\t": "\\t"})[$])
 		.replace(/[\0-\u{1f}\u{7f}]/gu, $ => "\\" + $.codePointAt().toString(16) + ";") + "`" : a;
