@@ -194,8 +194,8 @@ const vm = () => {
 				if(!Array.isArray(pattern) || !Array.isArray(list[0])) return list.includes(pattern);
 				return pattern.length <= list[0].length + 1 && (pattern.length ? list[0].splice(0, pattern.length - 1).map(a => [a]).concat(list).every((a, i) => f(pattern[i], ...a)) : !list[0].length);
 			};
-			const args = [unflatten1(escape(flatten1(pattern, ...effects)))];
-			return f(pattern, ...unflatten1(escape(path.concat(list)))) && args;
+			const args = [unflatten1(escape(flatten1(pattern, ...effects))), unflatten1(escape(path.concat(list)))];
+			return f(pattern, ...args[1]) && args;
 		};
 		if(handles.get(...list)) return;
 		const [pattern, ...effects] = unflatten1(list.slice(0, -1));
@@ -365,36 +365,37 @@ const stdvm = () => {
 	defn_bin("uint", "iota", (...args) => args.length || [uint_iota = uint_add(uint_iota, uint_atom)]);
 
 	vm0.exec(`
-		[reflex [def $0 $0] [reflex [fn $1] [fn $1 $2]]]
+		[reflex [def $0 $0] [reflex [fn $2] [fn $2 $3]]]
 
-		[reflex [undef $0 $0] [unreflex [fn $1] [fn $1 $2]]]
+		[reflex [undef $0 $0] [unreflex [fn $2] [fn $2 $3]]]
 
-		[reflex [let $0 $0 $0]
-			[reflex [fn [esc $2 [$1 $3]] $4 [$4 $4]] [unesc
-				[unreflex $4]
-				[reflex [fn [esc $6 _] $5 _] [unesc
-					[unreflex $9]
-					$7
-				]]
-				[unesc [fn [esc $6 _]]]
-			]]
-			[unesc [fn [esc $2 [$1 $3]]]]
-		]
+		;[reflex [let $0 $0 $0]
+		;	[reflex [fn [esc $2 [$1 $3]] $4 [$4 $4]] [unesc
+		;		[unreflex $4]
+		;		[reflex [fn [esc $6 _] $5 _] [unesc
+		;			[unreflex $9]
+		;			$7
+		;		]]
+		;		[unesc [fn [esc $6 _]]]
+		;	]]
+		;	[unesc [fn [esc $2 [$1 $3]]]]
+		;]
 
-		[reflex [on $0 $0]
-			[reflex [fn [esc [$1 $2]] $3] [unesc
-				[unreflex $3]
-				[reflex
-			]]
-			[unesc [fn [esc [$1 $2]]]]
-		]
+		;[reflex [on $0 $0]
+		;	[reflex [fn [esc _ [$1 $2]] _ [$3]] [unesc
+		;		[unreflex $3]
+		;		[unesc [reflex $1 [unesc $2]]]
+		;	]]
+		;	[unesc [fn [esc _ [$1 $2]]]]
+		;]
 
-		[reflex [on $0 $0] [unesc
-			[let [[$2] $1 $1 $2] [[$3] $3 $3]
-				[reflex $4
-					
-			]
-		]]
+		;[reflex [off $0 $0]
+		;	[reflex [fn [esc _ [$1 $2]] _ [$3]] [unesc
+		;		[unreflex $3]
+		;		[unesc [unreflex $1 [unesc $2]]]
+		;	]]
+		;	[unesc [fn [esc _ [$1 $2]]]]
+		;]
 	`);
 	return vm0;
 };
