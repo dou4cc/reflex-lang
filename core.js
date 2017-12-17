@@ -4,7 +4,7 @@ const flatten = (...list) => {
 	const begin = Symbol();
 	const end = Symbol();
 	const f = list => [].concat(...list.map(a => Array.isArray(a) ? [begin, ...f(a), end] : a));
-	return [begin, end, ...f(list)];
+	return [begin, end, f(list)];
 };
 
 const unflatten = (begin, end, list) => {
@@ -46,7 +46,7 @@ const str2num = (a, radix = 10) => {
 };
 
 const ast2signals = source => {
-	const [begin, end, ...list] = flatten(...source);
+	const [begin, end, list] = flatten(...source);
 	for(let i in list){
 		if(typeof list[i] !== "object") continue;
 		let {content} = list[i];
@@ -159,7 +159,7 @@ const is_token = a => is_str(a) && /^\$*$/u.test(a);
 
 const vm = () => {
 	const flatten1 = (...list) => {
-		const [begin1, end1] = [, , ...list] = flatten(...list);
+		const [begin1, end1] = [, , list] = flatten(...list);
 		return list.map(a => a === begin1 ? begin : a === end1 ? end : a);
 	};
 	const unflatten1 = list => unflatten(begin, end, list);
@@ -175,12 +175,11 @@ const vm = () => {
 		return reflex0.on(...path.slice(0, path.length - m), (...list) => listener(...decode(Array((m || 1) - 1).fill(begin).concat(list.slice(0, -1)))));
 	};
 	const emit0 = (...signals) => signals.forEach(signal => reflex0.emit(...encode(signal)));
-	const emit1 = (reflex, list) => unflatten1(list).forEach(signal => reflex.emit(...flatten1(signal)));
+	const emit1 = (list, reflex = reflex0) => unflatten1(list).forEach(signal => reflex.emit(...flatten1(signal)));
 	const escape = (list, times = 1) => list.map(a => is_token(a) ? "$".repeat(times) + a : a);
-	const unescape = (list, times = 1) => list.map(a => {
-		if(!is_token(a)) return a;
-		if(a.length < times) throw SyntaxError("Invalid encoding");
-		return a.slice(times);
+	const unescape = list => list.map(a => {
+		if(a === "") throw SyntaxError("Invalid encoding");
+		return is_token(a) ? a.slice(1) : a;
 	});
 	const begin = Symbol();
 	const end = Symbol();
@@ -203,7 +202,7 @@ const vm = () => {
 		const list1 = flatten1(pattern);
 		const path = unescape(list1.slice(0, list1.concat("").indexOf("")));
 		handles.set(...list, [
-			reflex0.on(...path, (...args) => (args = match(args)) && emit1(reflex0, [].concat(...flatten1(...effects).map(a => is_token(a) ? a.length < args.length ? args[a.length] : a.slice(args.length) : a)))),
+			reflex0.on(...path, (...args) => (args = match(args)) && emit1([].concat(...flatten1(...effects).map(a => is_token(a) ? a.length < args.length ? args[a.length] : a.slice(args.length) : a)))),
 			reflex1.on(...path, (...list1) => match(list1) && reflex0.emit(begin, "on", ...list)),
 		]);
 	});
@@ -213,16 +212,16 @@ const vm = () => {
 		handle.forEach(f => f());
 		handles.set(...list, undefined);
 	});
-	reflex0.on(begin, "match", (...list) => emit1(reflex1, list.slice(0, -1)));
+	reflex0.on(begin, "match", (...list) => emit1(list.slice(0, -1), reflex1));
 	reflex0.on(begin, "unesc", (...list) => {
 		try{
 			list = unescape(list.slice(0, -1));
 		}catch(error){
 			return;
 		}
-		emit1(reflex0, list);
+		emit1(list);
 	});
-	on(["fn", ["esc"]], (args, ...rest) => rest.length || args.length && emit0(["fn", ["esc", ...args], ...args.map((a, i) => decode(escape(encode(a), i)))]));
+	on(["fn", ["esc"]], (args, ...results) => results.length || args.length && emit0(["fn", ["esc", ...args], ...[].concat(...args.map((a, i) => decode(escape(encode(a), i))))]));
 	return {
 		on,
 		emit: emit0,
@@ -287,7 +286,7 @@ const uint_mul = uint_fn((a, b) => {
 });
 
 const uint_div = uint_fn((a, b) => {
-	if(!b.length) throw ReferenceError("The divisor cannot be 0.");
+	if(!b.length) throw ReferenceError("The divisor cannot be zero.");
 	if(a.length < b.length) return new Uint8Array;
 	let result = new ArrayBuffer;
 	for(let i = a.length - b.length + 1; i; i -= 1){
@@ -326,8 +325,8 @@ const stdvm = () => {
 
 	const defn = (...path) => {
 		const f = path.pop();
-		return vm0.on(["fn", path], (args, ...rest) => {
-			if(rest.length) return;
+		return vm0.on(["fn", path], (args, ...results) => {
+			if(results.length) return;
 			try{
 				args = ["fn", path.concat(args), ...f(...args)];
 			}catch(error){
@@ -374,10 +373,10 @@ const stdvm = () => {
 			[on [fn [esc $2 [$1 $3]] $4 [$4 $4]] [unesc
 				[off $4]
 				[on [_ let $6 $5] [unesc
-					[off $8]
+					[off $9]
 					$7
 				]]
-				[unesc [_ let $6 $5]]
+				[unesc [_ let $6 $6]]
 			]]
 			[unesc [fn [esc $2 [$1 $3]]]]
 		]
@@ -409,7 +408,7 @@ const utf8_to_str = utf8 => {
 };
 
 const signals2code = (options = {}) => (...signals) => {
-	const [begin, end, ...list] = flatten(...signals);
+	const [begin, end, list] = flatten(...signals);
 	return list
 	.map(a => {
 		if(a === begin) return "[ \t";
@@ -435,8 +434,8 @@ const signals2code = (options = {}) => (...signals) => {
 };
 
 const cvm = log => {
-	const vm0 = stdvm();
-	return v0;
+	const vm = stdvm();
+	return vm;
 };
 
 ({vm, stdvm, cvm});
