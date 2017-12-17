@@ -221,7 +221,10 @@ const vm = () => {
 		}
 		emit1(list);
 	});
-	on(["fn", ["esc"]], (args, ...results) => results.length || args.length && emit0(["fn", ["esc", ...args], ...[].concat(...args.map((a, i) => decode(escape(encode(a), i))))]));
+	on(["fn", ["esc"]], (args, ...results) => {
+		const base = encode(args[0]).filter(a => a === "").length;
+		if(!results.length && args.length > 1) emit0(["fn", ["esc", ...args], ...[].concat(...args.slice(1).map((a, i) => decode(escape(encode(a), i + base))))]);
+	});
 	return {
 		on,
 		emit: emit0,
