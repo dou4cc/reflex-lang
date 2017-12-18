@@ -382,6 +382,17 @@ const stdvm = () => {
 		;	[unesc [fn [esc $2 [$1 $3]]]]
 		;]
 
+		[reflex [on $0 $0]
+			[reflex [fn [esc $2 _ _ $2] $4 _ _ $4]
+				[unesc [unreflex $4]]
+				[reflex [fn [esc $6]]
+					[unesc [unreflex $
+				]
+				[unesc [fn [esc $6]]]
+			]
+			[unesc [fn [esc $2 _ _ $2]]]
+		]
+
 		;[reflex [on $0 $0]
 		;	[reflex [fn [esc _ [$1 $2]] _ [$3]] [unesc
 		;		[unreflex $3]
