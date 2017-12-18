@@ -9,7 +9,10 @@ const flatten = (...list) => {
 
 const unflatten = (begin, end, list) => {
 	const pos = list.lastIndexOf(begin);
-	if(pos < 0) return list;
+	if(pos < 0){
+		if(list.includes(end)) throw SyntaxError("Invalid token");
+		return list;
+	}
 	list.splice(pos, 0, list.splice(pos, list.indexOf(end, pos) - pos + 1).slice(1, -1));
 	return unflatten(begin, end, list);
 };
@@ -175,7 +178,7 @@ const vm = () => {
 		return reflex0.on(...path.slice(0, path.length - m), (...list) => listener(...decode(Array((m || 1) - 1).fill(begin).concat(list.slice(0, -1)))));
 	};
 	const emit0 = (...signals) => signals.forEach(signal => reflex0.emit(...encode(signal)));
-	const emit1 = (list, reflex = reflex0) => unflatten1(list).forEach(signal => reflex.emit(...flatten1(signal)));
+	const emit1 = list => unflatten1(list).forEach(signal => reflex0.emit(...flatten1(signal)));
 	const escape = (list, times = 1) => list.map(a => is_token(a) ? "$".repeat(times) + a : a);
 	const unescape = list => list.map(a => {
 		if(a === "") throw SyntaxError("Invalid encoding");
@@ -184,7 +187,6 @@ const vm = () => {
 	const begin = Symbol();
 	const end = Symbol();
 	const reflex0 = reflex();
-	const reflex1 = reflex();
 	const handles = multi_key_map();
 	reflex0.on(begin, "reflex", (...list) => {
 		const match = list => {
@@ -201,18 +203,14 @@ const vm = () => {
 		const [pattern, ...effects] = unflatten1(list.slice(0, -1));
 		const list1 = flatten1(pattern);
 		const path = unescape(list1.slice(0, list1.concat("").indexOf("")));
-		handles.set(...list, [
-			reflex0.on(...path, (...args) => (args = match(args)) && emit1([].concat(...flatten1(...effects).map(a => is_token(a) ? a.length < args.length ? args[a.length] : a.slice(args.length) : a)))),
-			reflex1.on(...path, (...list1) => match(list1) && reflex0.emit(begin, "reflex", ...list)),
-		]);
+		handles.set(...list, reflex0.on(...path, (...args) => (args = match(args)) && emit1([].concat(...flatten1(...effects).map(a => is_token(a) ? a.length < args.length ? args[a.length] : a.slice(args.length) : a)))));
 	});
 	reflex0.on(begin, "unreflex", (...list) => {
 		const handle = handles.get(...list);
 		if(!handle) return;
-		handle.forEach(f => f());
+		handle();
 		handles.set(...list, undefined);
 	});
-	reflex0.on(begin, "match-reflex", (...list) => emit1(list.slice(0, -1), reflex1));
 	reflex0.on(begin, "unesc", (...list) => {
 		try{
 			list = unescape(list.slice(0, -1));
@@ -378,7 +376,7 @@ const stdvm = () => {
 		;		[reflex [fn [esc $6 _] $5 _] [unesc
 		;			[unreflex $9]
 		;			$7
-		;		]]
+		;		]]  
 		;		[unesc [fn [esc $6 _]]]
 		;	]]
 		;	[unesc [fn [esc $2 [$1 $3]]]]
@@ -449,7 +447,7 @@ const signals2code = (options = {}) => (...signals) => {
 		.replace(/[\0-\u{1f}\u{7f}]/gu, $ => "\\" + $.codePointAt().toString(16) + ";") + "`" : a;
 	})
 	.join(" ")
-	.replace(/ \t /gu, "");
+	.replace(/ (?:\t )+/gu, "");
 };
 
 const cvm = log => {
