@@ -196,8 +196,8 @@ const vm = () => {
 				if(!Array.isArray(pattern) || !Array.isArray(list[0])) return list.includes(pattern);
 				return pattern.length <= list[0].length + 1 && (pattern.length ? list[0].splice(0, pattern.length - 1).map(a => [a]).concat(list).every((a, i) => f(pattern[i], ...a)) : !list[0].length);
 			};
-			const args = [unflatten1(escape(flatten1(pattern, ...effects))), unflatten1(escape(path.concat(list)))];
-			return f(pattern, ...args[1]) && args;
+			const args = [unflatten1(escape(flatten1(pattern, ...effects)))];
+			return f(pattern, ...unflatten1(escape(path.concat(list)))) && args;
 		};
 		if(handles.get(...list)) return;
 		const [pattern, ...effects] = unflatten1(list.slice(0, -1));
