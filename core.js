@@ -400,6 +400,14 @@ const stdvm = () => {
 			[unesc [fn [esc _ $2 [$1 $3]]]]
 		]
 
+		[reflex [let $0 $0 $0]
+			[_ reflex [fn [esc _ $2 $1 $3] _ $4 $4 $4] [unesc
+				[_ reflex [fn [esc $6 $9 $9] $9 _ _] $7]
+				[unesc [fn [esc $6 _ _]]]
+			]]
+			[unesc [fn [esc _ $2 $1 $3]]]
+		]
+
 		;[reflex [fn [listener-to-reflex $0 $0]]
 		;	[reflex [fn [esc $5 _ _ [$2 $3]] _ _ [$4 $4]]
 		;		[unesc [unreflex $4]]
