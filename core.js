@@ -223,8 +223,10 @@ const vm = () => {
 		const list = encode(args[0]);
 		const n = list.filter(a => a === "").length;
 		let i = 0;
-		list = list.map(a => is_token(a) ? a ? a + "$".repeat(n) : "$".repeat((i += 1) - 1) : a);
-		if(!results.length && args.length) emit0(["fn", ["esc", ...args], ...decode(list), ...[].concat(...args.slice(1).map((a, i) => decode(escape(encode(a), i + n))))]);
+		if(!results.length && args.length) emit0(["fn", ["esc", ...args],
+			...decode(list.map(a => is_token(a) ? a ? a + "$".repeat(n) : "$".repeat((i += 1) - 1) : a)),
+			...[].concat(...args.slice(1).map((a, i) => decode(escape(encode(a), i + n)))),
+		]);
 	});
 	return {
 		on,
@@ -369,9 +371,9 @@ const stdvm = () => {
 	defn_bin("uint", "iota", (...args) => args.length || [uint_iota = uint_add(uint_iota, uint_atom)]);
 
 	vm0.exec(`
-		[reflex [def $0 $0] [reflex [fn $2] [fn $2 $3]]]
+		;[reflex [def $0 $0] [reflex [fn $2] [fn $2 $3]]]
 
-		[reflex [undef $0 $0] [unreflex [fn $2] [fn $2 $3]]]
+		;[reflex [undef $0 $0] [unreflex [fn $2] [fn $2 $3]]]
 
 		;[reflex [let $0 $0 $0]
 		;	[reflex [fn [esc $2 [$1 $3]] $4 [$4 $4]] [unesc
@@ -385,18 +387,18 @@ const stdvm = () => {
 		;	[unesc [fn [esc $2 [$1 $3]]]]
 		;]
 
-		[reflex [_ reflex $0 $0] [unesc [reflex $2
-			[unesc [unreflex $5]]
-			$3
+		[reflex [_ reflex $0 $0] [unesc [reflex $1
+			[unesc [unreflex $4]]
+			$2
 		]]]
 
-		;[reflex [let $0 $0 $0]
-		;	[_ reflex [fn [esc _ $3 $2 _ $4] $5 $5 _ $5] [unesc
-		;		[_ reflex [fn [esc _ $8 $11] $7 _] [unesc $9]]
-		;		[unesc [fn [esc _ $8 _]]]
-		;	]]
-		;	[unesc [fn [esc _ $3 $2 _ $4]]]
-		;]
+		[reflex [let $0 $0 $0]
+			[_ reflex [fn [esc _ $2 [$1 $3]] _ $4 [$4 $4]] [unesc
+				[_ reflex [fn [esc _ $6 _] _ $5 _] [unesc $7]]
+				[unesc [fn [esc _ $6 _]]]
+			]]
+			[unesc [fn [esc _ $2 [$1 $3]]]]
+		]
 
 		;[reflex [fn [listener-to-reflex $0 $0]]
 		;	[reflex [fn [esc $5 _ _ [$2 $3]] _ _ [$4 $4]]
