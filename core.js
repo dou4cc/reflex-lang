@@ -220,8 +220,11 @@ const vm = () => {
 		emit1(list);
 	});
 	on(["fn", ["esc"]], (args, ...results) => {
-		const base = encode(args[0]).filter(a => a === "").length;
-		if(!results.length && args.length > 1) emit0(["fn", ["esc", ...args], ...[].concat(...args.slice(1).map((a, i) => decode(escape(encode(a), i + base))))]);
+		const list = encode(args[0]);
+		const n = list.filter(a => a === "").length;
+		let i = 0;
+		list = list.map(a => is_token(a) ? a ? a + "$".repeat(n) : "$".repeat((i += 1) - 1) : a);
+		if(!results.length && args.length) emit0(["fn", ["esc", ...args], ...decode(list), ...[].concat(...args.slice(1).map((a, i) => decode(escape(encode(a), i + n))))]);
 	});
 	return {
 		on,
@@ -376,22 +379,50 @@ const stdvm = () => {
 		;		[reflex [fn [esc $6 _] $5 _] [unesc
 		;			[unreflex $9]
 		;			$7
-		;		]]  
+		;		]]
 		;		[unesc [fn [esc $6 _]]]
 		;	]]
 		;	[unesc [fn [esc $2 [$1 $3]]]]
 		;]
 
-		[reflex [on $0 $0]
-			[reflex [fn [esc $2 _ _ $2] $4 _ _ $4]
-				[unesc [unreflex $4]]
-				[reflex [fn [esc $6]]
-					[unesc [unreflex $
-				]
-				[unesc [fn [esc $6]]]
-			]
-			[unesc [fn [esc $2 _ _ $2]]]
-		]
+		[reflex [_ reflex $0 $0] [unesc [reflex $2
+			[unesc [unreflex $5]]
+			$3
+		]]]
+
+		;[reflex [let $0 $0 $0]
+		;	[_ reflex [fn [esc _ $3 $2 _ $4] $5 $5 _ $5] [unesc
+		;		[_ reflex [fn [esc _ $8 $11] $7 _] [unesc $9]]
+		;		[unesc [fn [esc _ $8 _]]]
+		;	]]
+		;	[unesc [fn [esc _ $3 $2 _ $4]]]
+		;]
+
+		;[reflex [fn [listener-to-reflex $0 $0]]
+		;	[reflex [fn [esc $5 _ _ [$2 $3]] _ _ [$4 $4]]
+		;		[unesc [unreflex $4]]
+		;		[reflex [fn [esc $6]]
+		;			[unesc [unreflex $8]]
+		;			[fn [listener-to-reflex $6 $7] $6
+		;			]
+		;		]
+		;		[unesc [fn [esc $6 _
+		;			[reflex [_ listener 
+		;		]]]
+		;	]
+		;	[unesc [fn [esc $5 _ _ [$2 $3]]]]
+		;]
+
+		;[reflex [fn [listener-to-reflex $0 $0]]
+		;	[reflex [fn [esc $2 _ _ $2] $4 _ _ $4]
+		;		[unesc [unreflex $4]]
+		;		[reflex [fn [esc $6]]
+		;			[unesc [unreflex $
+		;		]
+		;		[unesc [fn [esc $6]]]
+		;	]
+		;	[unesc [fn [esc $2 _ _ $2]]]
+		;]
 
 		;[reflex [on $0 $0]
 		;	[reflex [fn [esc _ [$1 $2]] _ [$3]] [unesc
