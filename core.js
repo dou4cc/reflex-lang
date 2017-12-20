@@ -375,38 +375,48 @@ const stdvm = () => {
 
 		;[reflex [undef $0 $0] [unreflex [fn $2] [fn $2 $3]]]
 
-		;[reflex [let $0 $0 $0]
-		;	[reflex [fn [esc $2 [$1 $3]] $4 [$4 $4]] [unesc
-		;		[unreflex $4]
-		;		[reflex [fn [esc $6 _] $5 _] [unesc
-		;			[unreflex $9]
-		;			$7
-		;		]]
-		;		[unesc [fn [esc $6 _]]]
-		;	]]
-		;	[unesc [fn [esc $2 [$1 $3]]]]
-		;]
+		[reflex [-reflex $0 $0] [unesc
+			[reflex $1
+				[unesc [unreflex $4]]
+				$2
+			]
+			[defer [unreflex $1
+				[unesc [unreflex $4]]
+				$2
+			]]
+		]]
 
-		[reflex [_ reflex $0 $0] [unesc [reflex $1
-			[unesc [unreflex $4]]
-			$2
-		]]]
-
-		[reflex [let $0 $0 $0]
-			[_ reflex [fn [esc _ $2 [$1 $3]] _ $4 [$4 $4]] [unesc
-				[_ reflex [fn [esc _ $6 _] _ $5 _] [unesc $7]]
-				[unesc [fn [esc _ $6 _]]]
+		[reflex [-match $0 $0 $0]
+			[-reflex [fn [esc _ $2 [$1 $3]] _ $4 [$4 $4]] [unesc
+				[-reflex [fn [esc _ $6] _ $5] $7]
+				[unesc [fn [esc _ $6]]]
 			]]
 			[unesc [fn [esc _ $2 [$1 $3]]]]
 		]
 
-		[reflex [let $0 $0 $0]
-			[_ reflex [fn [esc _ $2 $1 $3] _ $4 $4 $4] [unesc
-				[_ reflex [fn [esc $6 $9 $9] $9 _ _] $7]
-				[unesc [fn [esc $6 _ _]]]
-			]]
-			[unesc [fn [esc _ $2 $1 $3]]]
+		[reflex [-call $0 $0]
+			[-reflex [_ -call $1 $3] $2]
+			[-reflex [fn [esc _ $1 _ _ $1] _ $3 _ _ $3]
+				[-reflex [fn $4 $6 $6] [unesc [_ -call $5 $7 $8]]]
+				[unesc [fn $4]]
+			]
+			[unesc [fn [esc _ $1 _ _ $1]]]
 		]
+
+		;[reflex [match $0 $0 $0] [unesc [-call [esc _ $2 [$1 $3]] [unesc [-match [$5] [_ $7 [$7 $7]] [unesc
+		;	[-reflex [fn [esc _ $8] _ $7] $9]
+		;	[unesc [fn [esc _ $8]]]
+		;]]]]]]
+
+		;[reflex [match $0 $0 $0] [unesc
+		;	[-call [esc _ $2 [$2 $3]] [unesc
+		;	[-match [$5] [_ $7 [$7 $7]] [unesc
+		;	[-match _ $11
+		;	[-match $7 $11 [unesc
+		;	[-match $13 $8
+		;	$9
+		;	]]]]]]]]
+		;]]
 
 		;[reflex [fn [listener-to-reflex $0 $0]]
 		;	[reflex [fn [esc $5 _ _ [$2 $3]] _ _ [$4 $4]]
@@ -513,5 +523,5 @@ const cvm = log => {
 var signals2code0 = signals2code({utf8_to_str: true});
 var vm0 = stdvm();
 vm0.on(["test", "echo"], (...args) => console.log(signals2code0(...args)));
-//vm0.on((...signals) => console.log("log", signals2code0(...signals)));
+//vm0.on((...signals) => console.log("signal", signals2code0(...signals)));
 //*/
