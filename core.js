@@ -225,8 +225,8 @@ const vm = () => {
 	reflexion0.on("match?", (...args) => {
 		const [target, pattern, effects0, ...effects1] = unflatten1(args);
 		args = match(target, pattern);
-		if(args) return Array.isArray(effects0) && apply(effects0, ...args);
-		apply(effects1);
+		if(!args) return apply(effects1);
+		if(Array.isArray(effects0)) apply(effects0, ...args);
 	});
 	reflexion0.on("escape", (...list) => {
 		const [target, ...effects] = unflatten1(list);
