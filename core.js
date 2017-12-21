@@ -61,7 +61,8 @@ const ast2signals = source => {
 			if(/^%/u.test(content)){
 				if(!(content.length % 2)) throw SyntaxError("Invalid token");
 				content = content.slice(1);
-				list[i] = new Uint8Array(content.length / 2).map((a, i) => str2num(content.substr(i * 2, 2).replace(/^0*/u, ""), 16)).buffer;
+				list[i] = new Uint8Array(content.length / 2)
+				.map((a, i) => str2num(content.substr(i * 2, 2).replace(/^0*/u, ""), 16)).buffer;
 				continue;
 			}
 			if(/^\$\d/u.test(content)) content = "$".repeat(str2num(content.slice(1)));
@@ -73,28 +74,38 @@ const ast2signals = source => {
 
 const code2signals = source => ast2signals(code2ast(source));
 
-const reflex = free => {
-	const off = () => children.size || listeners.size || free && free();
+const run = f => {
+	try{
+		f();
+	}catch(error){
+		setTimeout(() => {
+			throw error;
+		});
+	}
+};
+
+const reflexion = free => {
+	const off = () => children.size || reflexes.size || free && free();
 	const children = new Map;
-	const listeners = new Set;
+	const reflexes = new Set;
 	const f = path => ({
 		emit: (...list) => {
 			list = path.concat(list);
-			const listeners1 = Array.from(listeners).reverse();
+			const reflexes1 = Array.from(reflexes).reverse();
 			if(list.length) (children.get(list[0]) || {emit(){}}).emit(...list.slice(1));
-			listeners1.forEach(f => listeners.has(f) && f(...list));
+			reflexes1.forEach(f => reflexes.has(f) && f(...list));
 		},
 		on: (...rest) => {
-			let first = (rest = path.concat(rest)).shift();
+			const first = (rest = path.concat(rest)).shift();
 			if(!rest.length){
-				first = first.bind();
-				listeners.add(first);
+				const reflex = (...args) => run(() => first(...args));
+				reflexes.add(reflex);
 				return () => {
-					listeners.delete(first);
+					reflexes.delete(reflex);
 					off();
 				};
 			}
-			if(!children.has(first)) children.set(first, reflex(() => {
+			if(!children.has(first)) children.set(first, reflexion(() => {
 				children.delete(first);
 				off();
 			}));
@@ -171,67 +182,65 @@ const vm = () => {
 		return buffer ? buffer2bin(buffer) : is_str(a) ? str2bin(a) : a;
 	});
 	const decode = list => unflatten1(list.map(a => is_str(a) ? bin2buffer(a) : a));
-	const on = (path, listener) => {
-		if(!listener) return reflex0.on((...list) => path(...decode(list)));
-		path = encode(path);
-		const m = path.slice().reverse().concat(0).findIndex(a => a !== end);
-		return reflex0.on(...path.slice(0, path.length - m), (...list) => listener(...decode(Array((m || 1) - 1).fill(begin).concat(list.slice(0, -1)))));
-	};
-	const emit0 = (...signals) => signals.forEach(signal => reflex0.emit(...encode(signal)));
-	const emit1 = list => unflatten1(list).forEach(signal => reflex0.emit(...flatten1(signal)));
-	const escape = (list, times = 1) => list.map(a => is_token(a) ? "$".repeat(times) + a : a);
+	const emit = (...signals) => signals.forEach(signal => Array.isArray(signal) && reflexion0.emit(...encode(...signal)));
+	const escape = list => list.map(a => is_token(a) ? "$" + a : a);
 	const unescape = list => list.map(a => {
 		if(a === "") throw SyntaxError("Invalid encoding");
 		return is_token(a) ? a.slice(1) : a;
 	});
+	const match = (target, pattern) => {
+		const f = (pattern, ...list) => {
+			if(pattern === "") return args.push(list);
+			if(list.length > 1) return;
+			if(!Array.isArray(pattern) || !Array.isArray(list[0])) return escape(list).includes(pattern);
+			if(pattern.length > list[0].length + 1) return;
+			if(!pattern.length) return !list[0].length;
+			return list[0].splice(0, pattern.length - 1).map(a => [a]).concat(list).every((a, i) => f(pattern[i], ...a));
+		};
+		const args = [];
+		if(f(pattern, target)) return args;
+	};
+	const apply = (effects, ...args) => unflatten1([].concat(...flatten1(...effects).map(a =>
+		is_token(a) ? a.length < args.length ? args[a.length] : a.slice(args.length) : a
+	))).forEach(signal => Array.isArray(signal) && reflexion0.emit(...flatten1(...signal)));
 	const begin = Symbol();
 	const end = Symbol();
-	const reflex0 = reflex();
+	const reflexion0 = reflexion();
 	const handles = multi_key_map();
-	reflex0.on(begin, "reflex", (...list) => {
-		const match = list => {
-			const f = (pattern, ...list) => {
-				if(pattern === "") return args.push(list);
-				if(list.length > 1) return;
-				if(!Array.isArray(pattern) || !Array.isArray(list[0])) return list.includes(pattern);
-				return pattern.length <= list[0].length + 1 && (pattern.length ? list[0].splice(0, pattern.length - 1).map(a => [a]).concat(list).every((a, i) => f(pattern[i], ...a)) : !list[0].length);
-			};
-			const args = [unflatten1(escape(flatten1(pattern, ...effects)))];
-			return f(pattern, ...unflatten1(escape(path.concat(list)))) && args;
-		};
+	reflexion0.on("reflex", (...list) => {
 		if(handles.get(...list)) return;
-		const [pattern, ...effects] = unflatten1(list.slice(0, -1));
-		const list1 = flatten1(pattern);
+		const self = unflatten1(list);
+		const list1 = Array.isArray(self[0]) ? flatten1(...self[0]) : [];
 		const path = unescape(list1.slice(0, list1.concat("").indexOf("")));
-		handles.set(...list, reflex0.on(...path, (...args) => (args = match(args)) && emit1([].concat(...flatten1(...effects).map(a => is_token(a) ? a.length < args.length ? args[a.length] : a.slice(args.length) : a)))));
+		handles.set(...list, reflexion0.on(...path, (...target) =>
+			match(target = unflatten1(path.concat(target)), self[0]) && apply(self.slice(1), self, target)
+		));
 	});
-	reflex0.on(begin, "unreflex", (...list) => {
+	reflexion0.on("unreflex", (...list) => {
 		const handle = handles.get(...list);
 		if(!handle) return;
 		handle();
 		handles.set(...list, undefined);
 	});
-	reflex0.on(begin, "unesc", (...list) => {
-		try{
-			list = unescape(list.slice(0, -1));
-		}catch(error){
-			return;
-		}
-		emit1(list);
+	reflexion0.on("match?", (...args) => {
+		const [target, pattern, effects0, ...effects1] = unflatten1(args);
+		args = match(target, pattern);
+		if(args) return Array.isArray(effects0) && apply(effects0, ...args);
+		apply(effects1);
 	});
-	on(["fn", ["esc"]], (args, ...results) => {
-		const list = encode(args[0]);
-		const n = list.filter(a => a === "").length;
-		let i = 0;
-		if(!results.length && args.length) emit0(["fn", ["esc", ...args],
-			...decode(list.map(a => is_token(a) ? a ? a + "$".repeat(n) : "$".repeat((i += 1) - 1) : a)),
-			...[].concat(...args.slice(1).map((a, i) => decode(escape(encode(a), i + n)))),
-		]);
+	reflexion0.on("escape", (...list) => {
+		const [target, ...effects] = unflatten1(list);
+		apply(effects, ...unflatten1(escape(flatten1(target))));
 	});
 	return {
-		on,
-		emit: emit0,
-		exec: code => emit0(...code2signals(code)),
+		emit,
+		on: (...path) => {
+			const reflex = path.pop();
+			path = encode(...path);
+			const m = path.slice().reverse().concat(0).findIndex(a => a !== end);
+			return reflexion0.on(...path.slice(0, path.length - m), (...list) => reflex(...decode(Array(m).fill(begin).concat(list))));
+		},
+		exec: code => emit(...code2signals(code)),
 	};
 };
 
@@ -298,7 +307,9 @@ const uint_div = uint_fn((a, b) => {
 	for(let i = a.length - b.length + 1; i; i -= 1){
 		const step = new Uint8Array(i);
 		step.subarray(-1)[0] = 1;
-		for(let j = 1; j < 0xff && uint_cmp(uint_mul(uint_add(result, step.buffer), b.buffer), a.buffer) <= 0; j += 1) result = uint_add(result, step.buffer);
+		for(let j = 1; j < 0xff && uint_cmp(uint_mul(uint_add(result, step.buffer), b.buffer), a.buffer) <= 0; j += 1){
+			result = uint_add(result, step.buffer);
+		}
 	}
 	return new Uint8Array(result);
 });
@@ -306,11 +317,12 @@ const uint_div = uint_fn((a, b) => {
 const uint_mod = (a, b) => uint_sub(a, uint_mul(uint_div(a, b), b));
 
 const same_lists = (...lists) => {
-	if(Array.isArray(lists[0])) return lists.slice(1).every(a => Array.isArray(a) && a.length === lists[0].length) && lists[0].every((_, i) => same_lists(...lists.map(list => list[i])));
-	return lists.splice(1).every(a => {
+	if(!Array.isArray(lists[0])) return lists.splice(1).every(a => {
 		const [buffer0, buffer1] = lists.concat([a]).map(is_buffer);
 		return lists.includes(a) || buffer0 && buffer1 && buffer2bin(buffer0) === buffer2bin(buffer1);
 	});
+	if(!lists.slice(1).every(a => Array.isArray(a) && a.length === lists[0].length)) return false;
+	return lists[0].every((_, i) => same_lists(...lists.map(list => list[i])));
 };
 
 const uint2num = uint => {
