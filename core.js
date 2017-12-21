@@ -19,7 +19,7 @@ const unflatten = (begin, end, list) => {
 
 const code2ast = source => {
 	source = source.replace(/\r\n?/gu, "\n");
-	const words = source.match(/`(?:\\`|[^`])*`|[[\]]|(?:(?![[;`\]])\S)+|;.*/gu);
+	const words = source.match(/`(?:\\`|[^`])*`|[[\]]|(?:(?![[;`\]])\S)+|;.*/gu) || [];
 	return unflatten("[", "]", words.filter(a => !/^;/u.test(a)).map(a => {
 		if(/^[[\]]$/u.test(a)) return a;
 		if(/^`.*`$/u.test(a)) return {flag: "`", content:
@@ -61,8 +61,7 @@ const ast2signals = source => {
 			if(/^%/u.test(content)){
 				if(!(content.length % 2)) throw SyntaxError("Invalid token");
 				content = content.slice(1);
-				list[i] = new Uint8Array(content.length / 2)
-				.map((a, i) => str2num(content.substr(i * 2, 2).replace(/^0*/u, ""), 16)).buffer;
+				list[i] = new Uint8Array(content.length / 2).map((a, i) => str2num(content.substr(i * 2, 2).replace(/^0*/u, ""), 16)).buffer;
 				continue;
 			}
 			if(/^\$\d/u.test(content)) content = "$".repeat(str2num(content.slice(1)));
@@ -337,20 +336,17 @@ const uint2num = uint => {
 const stdvm = () => {
 	const vm0 = vm();
 
-	vm0.on(["defer"], (...signals) => Promise.resolve().then(() => vm0.emit(...signals)).catch(error => setTimeout(() => {
-		throw error;
-	})));
+	vm0.on("defer", (...signals) => Promise.resolve().then(() => run(() => vm0.emit(...signals))));
 
 	const defn = (...path) => {
 		const f = path.pop();
-		return vm0.on(["fn", path], (args, ...results) => {
-			if(results.length) return;
+		return vm0.on(...path, (args, ...effects) => {
 			try{
-				args = ["fn", path.concat(args), ...f(...args)];
+				args = [...f(...args)];
 			}catch(error){
 				return;
 			}
-			if(args.length > 1) vm0.emit(args);
+			vm0.emit(["match", args, [""], effects]);
 		});
 	};
 	defn("=", (...args) => [same_lists(...arg).toString()]);
@@ -383,94 +379,6 @@ const stdvm = () => {
 	defn_bin("uint", "iota", (...args) => args.length || [uint_iota = uint_add(uint_iota, uint_atom)]);
 
 	vm0.exec(`
-		;[reflex [def $0 $0] [reflex [fn $2] [fn $2 $3]]]
-
-		;[reflex [undef $0 $0] [unreflex [fn $2] [fn $2 $3]]]
-
-		[reflex [-reflex $0 $0] [unesc
-			[reflex $1
-				[unesc [unreflex $4]]
-				$2
-			]
-			[defer [unreflex $1
-				[unesc [unreflex $4]]
-				$2
-			]]
-		]]
-
-		[reflex [-match $0 $0 $0]
-			[-reflex [fn [esc _ $2 [$1 $3]] _ $4 [$4 $4]] [unesc
-				[-reflex [fn [esc _ $6] _ $5] $7]
-				[unesc [fn [esc _ $6]]]
-			]]
-			[unesc [fn [esc _ $2 [$1 $3]]]]
-		]
-
-		[reflex [-call $0 $0]
-			[-reflex [_ -call $1 $3] $2]
-			[-reflex [fn [esc _ $1 _ _ $1] _ $3 _ _ $3]
-				[-reflex [fn $4 $6 $6] [unesc [_ -call $5 $7 $8]]]
-				[unesc [fn $4]]
-			]
-			[unesc [fn [esc _ $1 _ _ $1]]]
-		]
-
-		;[reflex [match $0 $0 $0] [unesc [-call [esc _ $2 [$1 $3]] [unesc [-match [$5] [_ $7 [$7 $7]] [unesc
-		;	[-reflex [fn [esc _ $8] _ $7] $9]
-		;	[unesc [fn [esc _ $8]]]
-		;]]]]]]
-
-		;[reflex [match $0 $0 $0] [unesc
-		;	[-call [esc _ $2 [$2 $3]] [unesc
-		;	[-match [$5] [_ $7 [$7 $7]] [unesc
-		;	[-match _ $11
-		;	[-match $7 $11 [unesc
-		;	[-match $13 $8
-		;	$9
-		;	]]]]]]]]
-		;]]
-
-		;[reflex [fn [listener-to-reflex $0 $0]]
-		;	[reflex [fn [esc $5 _ _ [$2 $3]] _ _ [$4 $4]]
-		;		[unesc [unreflex $4]]
-		;		[reflex [fn [esc $6]]
-		;			[unesc [unreflex $8]]
-		;			[fn [listener-to-reflex $6 $7] $6
-		;			]
-		;		]
-		;		[unesc [fn [esc $6 _
-		;			[reflex [_ listener 
-		;		]]]
-		;	]
-		;	[unesc [fn [esc $5 _ _ [$2 $3]]]]
-		;]
-
-		;[reflex [fn [listener-to-reflex $0 $0]]
-		;	[reflex [fn [esc $2 _ _ $2] $4 _ _ $4]
-		;		[unesc [unreflex $4]]
-		;		[reflex [fn [esc $6]]
-		;			[unesc [unreflex $
-		;		]
-		;		[unesc [fn [esc $6]]]
-		;	]
-		;	[unesc [fn [esc $2 _ _ $2]]]
-		;]
-
-		;[reflex [on $0 $0]
-		;	[reflex [fn [esc _ [$1 $2]] _ [$3]] [unesc
-		;		[unreflex $3]
-		;		[unesc [reflex $1 [unesc $2]]]
-		;	]]
-		;	[unesc [fn [esc _ [$1 $2]]]]
-		;]
-
-		;[reflex [off $0 $0]
-		;	[reflex [fn [esc _ [$1 $2]] _ [$3]] [unesc
-		;		[unreflex $3]
-		;		[unesc [unreflex $1 [unesc $2]]]
-		;	]]
-		;	[unesc [fn [esc _ [$1 $2]]]]
-		;]
 	`);
 	return vm0;
 };
