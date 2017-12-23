@@ -198,9 +198,9 @@ const vm = () => {
 		const args = [];
 		if(f(pattern, target)) return args;
 	};
-	const apply = (effects, ...args) => unflatten1([].concat(...flatten1(...effects).map(a =>
+	const apply = (effect, ...args) => reflexion0.emit(...[].concat(...flatten1(...effect).map(a =>
 		is_token(a) ? a.length < args.length ? args[a.length] : a.slice(args.length) : a
-	))).forEach(signal => Array.isArray(signal) && reflexion0.emit(...flatten1(...signal)));
+	)));
 	const begin = Symbol();
 	const end = Symbol();
 	const reflexion0 = reflexion();
@@ -220,16 +220,17 @@ const vm = () => {
 		handle();
 		handles.set(...list, undefined);
 	});
-	reflexion0.on("match?", (...args) => {
-		const [target, pattern, effects0, ...effects1] = unflatten1(args);
+	reflexion0.on("match", (...args) => {
+		const [target, pattern, effect0, ...effect1] = unflatten1(args);
 		args = match(target, pattern);
-		if(!args) return apply(effects1);
-		if(Array.isArray(effects0)) apply(effects0, ...args);
+		if(!args) return apply(effect1);
+		if(Array.isArray(effect0)) apply(effect0, ...args);
 	});
 	reflexion0.on("escape", (...list) => {
-		const [target, ...effects] = unflatten1(list);
-		apply(effects, ...unflatten1(escape(flatten1(target))));
+		const [target, ...effect] = unflatten1(list);
+		apply(effect, ...unflatten1(escape(flatten1(target))));
 	});
+	reflexion0.on("do", (...list) => unflatten1(list).forEach(signal => Array.isArray(signal) && reflexion0.emit(...flatten1(...signal))));
 	return {
 		emit,
 		on: (...path) => {
@@ -335,12 +336,12 @@ const uint2num = uint => {
 const stdvm = () => {
 	const defn = (...path) => {
 		const f = path.pop();
-		return vm0.on(...path, (...effects) => {
+		return vm0.on(...path, (...effect) => {
 			let results;
 			try{
-				results = [...f(effects)];
+				results = [...f(effect)];
 			}catch(error){}
-			if(results) vm0.emit(["match?", results, [""], effects]);
+			if(results) vm0.emit(["match", results, [""], effect]);
 		});
 	};
 	const defop = length => (...path) => {
@@ -357,7 +358,11 @@ const stdvm = () => {
 
 	vm0.on("defer", (...signals) => Promise.resolve().then(() => run(() => vm0.emit(...signals))));
 	defop_2("=", (a, b) => [literal_map.get(same_lists(a, b))]);
-	defop_2("&", (a, b) => [a, b].every(is_buffer) ? [new Uint8Array([].concat(...[a, b].map(a => new Uint8Array(a)))).buffer] : [].concat(...a, ...b));
+	defop_2("&", (...args) => {
+		const every = args.every(is_buffer);
+		args = args.map(a => is_buffer(a) ? new Uint8Array(a) : a);
+		return every ? [new Uint8Array([].concat(...args)).buffer] : [].concat(...args.map(a => [...a]));
+	});
 
 	defop_2("bin", "&", bin_fn((a, b) => [buffer_and(a, b)]));
 	defop_2("bin", "|", bin_fn((a, b) => [buffer_or(a, b)]));
@@ -370,7 +375,7 @@ const stdvm = () => {
 	defop_2("uint", "+", bin_fn((a, b) => [uint_add(a, b)]));
 	defop_2("uint", "-", bin_fn((a, b) => [uint_sub(a, b)]));
 	defop_2("uint", "*", bin_fn((a, b) => [uint_mul(a, b)]));
-	defop_2("uint", "/", bin_fn((a, b) => uint_div(a, b)));
+	defop_2("uint", "/", bin_fn((a, b) => [uint_div(a, b), uint_mod(a, b)]));
 	defop_2("uint", "<", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) < 0)]));
 	defop_2("uint", ">", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) > 0)]));
 	defop_2("uint", "<=", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) <= 0)]));
@@ -378,6 +383,12 @@ const stdvm = () => {
 	defn("uint", "iota", () => [uint_s = uint_add(uint_s, uint_1)]);
 
 	vm0.exec(`
+		;[reflex [reflex $0 $0] [match [$1] [reflex [emit $2] $2] [] [match [[$1] $1] [$2 [$2] $2] [
+		;	[escape [$2 $3] [match $5 [$6 $6] [
+		;		[escape 
+		;	]]]
+		;	[reflex [emit $3] $2]
+		;]]]
 	`);
 	return vm0;
 };
