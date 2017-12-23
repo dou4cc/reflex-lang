@@ -22,12 +22,12 @@ const code2ast = source => {
 	const words = source.match(/`(?:\\`|[^`])*`|[[\]]|(?:(?![[;`\]])\S)+|;.*/gu) || [];
 	return unflatten("[", "]", words.filter(a => !/^;/u.test(a)).map(a => {
 		if(/^[[\]]$/u.test(a)) return a;
-		if(/^`.*`$/u.test(a)) return {flag: "`", content:
+		if(/^`.*`$/u.test(a)) return {flag: "`", value:
 			a.slice(1, -1)
 			.replace(/(^|[^\\])\\[nrt]/gu, ($, $1) => $1 + {n: "\n", r: "\r", t: "\t"}[$1])
 			.replace(/(^|[^\\])\\([0-9a-f]+);/giu, ($, $1, $2) => $1 + String.fromCodePoint(Number.parseInt($2, 16)))
 			.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt])|\\*`)/gu, "$1")};
-		return {flag: "", content: a};
+		return {flag: "", value: a};
 	}));
 };
 
@@ -52,21 +52,20 @@ const ast2signals = source => {
 	const [begin, end, list] = flatten(...source);
 	for(let i in list){
 		if(typeof list[i] !== "object") continue;
-		let {content} = list[i];
+		let {value} = list[i];
 		if(!list[i].flag){
-			if(/^\\/u.test(content)){
-				list[i] = num2uint(str2num(content.slice(1)));
+			if(/^\\/u.test(value)){
+				list[i] = num2uint(str2num(value.slice(1)));
 				continue;
 			}
-			if(/^%/u.test(content)){
-				if(!(content.length % 2)) throw SyntaxError("Invalid token");
-				content = content.slice(1);
-				list[i] = new Uint8Array(content.length / 2).map((a, i) => str2num(content.substr(i * 2, 2).replace(/^0*/u, ""), 16)).buffer;
+			if(/^%/u.test(value)){
+				value = value.slice(1);
+				list[i] = new Uint8Array(Array(value.length / 2)).map((a, i) => str2num(value.substr(i * 2, 2).replace(/^(?:0(?!$))*/u, ""), 16)).buffer;
 				continue;
 			}
-			if(/^\$\d/u.test(content)) content = "$".repeat(str2num(content.slice(1)));
+			if(/^\$\d/u.test(value)) value = "$".repeat(str2num(value.slice(1)));
 		}
-		list[i] = content;
+		list[i] = value;
 	}
 	return unflatten(begin, end, list);
 };
@@ -334,49 +333,49 @@ const uint2num = uint => {
 };
 
 const stdvm = () => {
+	const defn = (...path) => {
+		const f = path.pop();
+		return vm0.on(...path, (...effects) => {
+			let results;
+			try{
+				results = [...f(effects)];
+			}catch(error){}
+			if(results) vm0.emit(["match?", results, [""], effects]);
+		});
+	};
+	const defop = length => (...path) => {
+		const f = path.pop();
+		return defn(...path, args => f(...args.splice(0, length)));
+	};
+	const defop_2 = defop(2);
+	const bin_fn = f => (...args) => args.every(is_buffer) && f(...args);
+	const literal_map = new Map([
+		[true, "T"],
+		[false, "F"],
+	]);
 	const vm0 = vm();
 
 	vm0.on("defer", (...signals) => Promise.resolve().then(() => run(() => vm0.emit(...signals))));
+	defop_2("=", (a, b) => [literal_map.get(same_lists(a, b))]);
+	defop_2("&", (a, b) => [a, b].every(is_buffer) ? [new Uint8Array([].concat(...[a, b].map(a => new Uint8Array(a)))).buffer] : [].concat(...a, ...b));
 
-	const defn = (...path) => {
-		const f = path.pop();
-		return vm0.on(...path, (args, ...effects) => {
-			try{
-				args = [...f(...args)];
-			}catch(error){
-				return;
-			}
-			vm0.emit(["match", args, [""], effects]);
-		});
-	};
-	defn("=", (...args) => [same_lists(...arg).toString()]);
-	defn("&", (...args) => args.every(is_buffer) ? new Uint8Array([].concat(...args.map(a => new Uint8Array(a)))).buffer : [].concat(...args.map(a => {
-		const list = Array.from(a);
-		return list.length ? list : a;
-	})));
+	defop_2("bin", "&", bin_fn((a, b) => [buffer_and(a, b)]));
+	defop_2("bin", "|", bin_fn((a, b) => [buffer_or(a, b)]));
+	defop_2("bin", "^", bin_fn((a, b) => [buffer_xor(a, b)]));
 
-	const defn_bin = (...path) => {
-		const f = path.pop();
-		return defn(...path, (...bins) => bins.every(is_buffer) && f(...bins));
-	};
-
-	defn_bin("bin", "&", (...bins) => [bins.reduce(buffer_and)]);
-	defn_bin("bin", "|", (...bins) => [bins.reduce(buffer_or)]);
-	defn_bin("bin", "^", (...bins) => [bins.reduce(buffer_xor)]);
-
-	let uint_iota = new ArrayBuffer;
-	const uint_atom = num2uint(1);
-	defn_bin("uint", "trim", (...uints) => uints.map(uint_trim));
-	defn_bin("uint", "=", (...uints) => [same_lists(...uints.map(uint_trim)).toString()]);
-	defn_bin("uint", "+", (...uints) => [uints.reduce(uint_add)]);
-	defn_bin("uint", "-", (...uints) => [uints.reduce(uint_sub)]);
-	defn_bin("uint", "*", (...uints) => [uints.reduce(uint_mul)]);
-	defn_bin("uint", "/", (...uints) => uints.length === 2 && [uint_div(...uints), uint_mod(...uints)]);
-	defn_bin("uint", "<", (...uints) => [uints.slice(1).every((a, i) => uint_cmp(uints[i - 1], a) < 0).toString()]);
-	defn_bin("uint", ">", (...uints) => [uints.slice(1).every((a, i) => uint_cmp(uints[i - 1], a) > 0).toString()]);
-	defn_bin("uint", "<=", (...uints) => [uints.slice(1).every((a, i) => uint_cmp(uints[i - 1], a) <= 0).toString()]);
-	defn_bin("uint", ">=", (...uints) => [uints.slice(1).every((a, i) => uint_cmp(uints[i - 1], a) >= 0).toString()]);
-	defn_bin("uint", "iota", (...args) => args.length || [uint_iota = uint_add(uint_iota, uint_atom)]);
+	let uint_s = new ArrayBuffer;
+	const uint_1 = num2uint(1);
+	defop(1)("uint", "trim", bin_fn(uint => [uint_trim(uint)]));
+	defop_2("uint", "=", bin_fn((...uints) => [literal_map.get(same_lists(...uints.map(uint_trim)))]));
+	defop_2("uint", "+", bin_fn((a, b) => [uint_add(a, b)]));
+	defop_2("uint", "-", bin_fn((a, b) => [uint_sub(a, b)]));
+	defop_2("uint", "*", bin_fn((a, b) => [uint_mul(a, b)]));
+	defop_2("uint", "/", bin_fn((a, b) => uint_div(a, b)));
+	defop_2("uint", "<", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) < 0)]));
+	defop_2("uint", ">", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) > 0)]));
+	defop_2("uint", "<=", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) <= 0)]));
+	defop_2("uint", ">=", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) >= 0)]));
+	defn("uint", "iota", () => [uint_s = uint_add(uint_s, uint_1)]);
 
 	vm0.exec(`
 	`);
@@ -442,6 +441,6 @@ const cvm = log => {
 /*test*
 var signals2code0 = signals2code({utf8_to_str: true});
 var vm0 = stdvm();
-vm0.on(["test", "echo"], (...args) => console.log(signals2code0(...args)));
+vm0.on("test", "echo", (...args) => console.log(signals2code0(...args)));
 //vm0.on((...signals) => console.log("signal", signals2code0(...signals)));
 //*/
