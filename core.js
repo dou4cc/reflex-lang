@@ -347,6 +347,20 @@ const stdvm = () => {
 	]);
 	const vm0 = vm();
 
+	vm0.exec(`
+		[reflex [reflex $0 $0] match [$1] [reflex [emit $2] $2] _ match [[$1] $1] [$2 reflex [$2] $2]
+			[escape [$2 $3] match $5 [$6 $6]
+				[escape $6 reflex [emit $7] start $8]
+			]
+		]
+
+		[reflex [unreflex $0 $0] match [$1] [unreflex [emit $2] $2] _ match [[$1] $1] [$2 unreflex [$2] $2]
+			[escape [$2 $3] match $5 [$6 $6]
+				[escape $6 unreflex [emit $7] start $8]
+			]
+		]
+	`);
+
 	vm0.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm0.emit(...signal))));
 	defop_2("=", (a, b) => [literal_map.get(same_lists(a, b))]);
 	defop_2("+", (...args) =>
@@ -374,20 +388,6 @@ const stdvm = () => {
 	defn("uint", "iota", () => [uint_iota = uint_add(uint_iota, uint_1)]);
 
 	vm0.exec(`
-		;[reflex [reflex $0 $0] match [$1] [reflex [emit $2] $2] _ match [[$1] $1] [$2 [$2] $2]
-		;	[escape [$2 [$3]] match $5 [$6 $6]
-		;		[escape $7 match $8 [$9] reflex $6 start
-		;			
-		;		]
-		;	]
-		;]
-
-		;[reflex [reflex $0 $0] [match [$1] [reflex [emit $2] $2] [] [match [[$1] $1] [$2 [$2] $2] [
-		;	[escape [$2 $3] [match $5 [$6 $6] [
-		;		[escape 
-		;	]]]
-		;	[reflex [emit $3] $2]
-		;]]]
 	`);
 	return vm0;
 };
