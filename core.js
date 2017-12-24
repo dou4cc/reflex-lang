@@ -1,46 +1,47 @@
 ﻿"use strict";
 
-const flatten = (...list) => {
+const serialize = (...list) => {
 	const begin = Symbol();
 	const end = Symbol();
 	const f = list => [].concat(...list.map(a => Array.isArray(a) ? [begin, ...f(a), end] : a));
 	return [begin, end, f(list)];
 };
 
-const unflatten = (begin, end, list) => {
+const deserialize = (begin, end, list) => {
 	const pos = list.lastIndexOf(begin);
 	if(pos < 0){
 		if(list.includes(end)) throw SyntaxError("Invalid token");
 		return list;
 	}
 	list.splice(pos, 0, list.splice(pos, list.indexOf(end, pos) - pos + 1).slice(1, -1));
-	return unflatten(begin, end, list);
+	return deserialize(begin, end, list);
 };
 
-const code2ast = source => {
-	source = source.replace(/\r\n?/gu, "\n");
-	const words = source.match(/`(?:\\`|[^`])*`|[[\]]|(?:(?![[;`\]])\S)+|;.*/gu) || [];
-	return unflatten("[", "]", words.filter(a => !/^;/u.test(a)).map(a => {
-		if(/^[[\]]$/u.test(a)) return a;
-		if(/^`.*`$/u.test(a)) return {flag: "`", value:
-			a.slice(1, -1)
+const code2ast = code => {
+	code = code.replace(/\r\n?/gu, "\n");
+	const tokens = code.match(/`(?:\\`|[^`])*`|[[\]]|(?:(?![[;`\]])\S)+|;.*/gu) || [];
+	return deserialize("[", "]", tokens.filter(token => !/^;/u.test(token)).map(token => {
+		if(/^[[\]]$/u.test(token)) return token;
+		if(/`/u.test(token)) return {flag: "`", value:
+			token.slice(1, -1)
 			.replace(/(^|[^\\])\\[nrt]/gu, ($, $1) => $1 + {n: "\n", r: "\r", t: "\t"}[$1])
 			.replace(/(^|[^\\])\\([0-9a-f]+);/giu, ($, $1, $2) => $1 + String.fromCodePoint(Number.parseInt($2, 16)))
-			.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt])|\\*`)/gu, "$1")};
-		return {flag: "", value: a};
+			.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt])|\\*`)/gu, "$1")
+		};
+		return {flag: "", value: token};
 	}));
 };
 
-const buffer_fn = f => (...args) => f(...args.map(a => new Uint8Array(a))).buffer;
+const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
 
 const num2uint = number => {
 	if(!Number.isSafeInteger(number) || number < 0) throw TypeError("Only safe natural number can be converted to uint.");
-	const result = [];
+	const array = [];
 	while(number >= 1){
-		result.push(number % 0xff);
+		array.push(number % 0xff);
 		number /= 0xff;
 	}
-	return new Uint8Array(result).buffer;
+	return new Uint8Array(array).buffer;
 };
 
 const str2num = (a, radix = 10) => {
@@ -48,29 +49,24 @@ const str2num = (a, radix = 10) => {
 	return a;
 };
 
-const ast2signals = source => {
-	const [begin, end, list] = flatten(...source);
-	for(let i in list){
-		if(typeof list[i] !== "object") continue;
-		let {value} = list[i];
-		if(!list[i].flag){
-			if(/^\\/u.test(value)){
-				list[i] = num2uint(str2num(value.slice(1)));
-				continue;
-			}
+const ast2signals = ast => {
+	const [begin, end, tokens] = serialize(...ast);
+	return deserialize(begin, end, tokens.map(token => {
+		if(typeof token === "symbol") return token;
+		let {value} = token;
+		if(!token.flag){
+			if(/^\\/u.test(value)) return num2uint(str2num(value.slice(1)));
 			if(/^%/u.test(value)){
 				value = value.slice(1);
-				list[i] = new Uint8Array(Array(value.length / 2)).map((a, i) => str2num(value.substr(i * 2, 2).replace(/^(?:0(?!$))*/u, ""), 16)).buffer;
-				continue;
+				return new Uint8Array(Array(value.length / 2)).map((a, i) => str2num(value.substr(i * 2, 2).replace(/^(?:0(?!$))*/u, ""), 16)).buffer;
 			}
 			if(/^\$\d/u.test(value)) value = "$".repeat(str2num(value.slice(1)));
 		}
-		list[i] = value;
-	}
-	return unflatten(begin, end, list);
+		return value;
+	}));
 };
 
-const code2signals = source => ast2signals(code2ast(source));
+const code2signals = code => ast2signals(code2ast(code));
 
 const run = f => {
 	try{
@@ -83,18 +79,17 @@ const run = f => {
 };
 
 const reflexion = free => {
-	const off = () => children.size || reflexes.size || free && free();
+	const off = () => children.size || reflexes.size || free && run(free);
 	const children = new Map;
 	const reflexes = new Set;
-	const f = path => ({
+	return {
 		emit: (...list) => {
-			list = path.concat(list);
 			const reflexes1 = Array.from(reflexes).reverse();
 			if(list.length) (children.get(list[0]) || {emit(){}}).emit(...list.slice(1));
 			reflexes1.forEach(f => reflexes.has(f) && f(...list));
 		},
 		on: (...rest) => {
-			const first = (rest = path.concat(rest)).shift();
+			const first = rest.shift();
 			if(!rest.length){
 				const reflex = (...args) => run(() => first(...args));
 				reflexes.add(reflex);
@@ -109,9 +104,7 @@ const reflexion = free => {
 			}));
 			return children.get(first).on(...rest);
 		},
-		path: (...list) => f(path.concat(list)),
-	});
-	return f([]);
+	};
 };
 
 const multi_key_map = () => {
@@ -167,51 +160,49 @@ const bin2buffer = binary => new Uint8Array(Array.from(binary).map(a => a.codePo
 
 const is_str = a => typeof a === "string";
 
-const is_token = a => is_str(a) && /^\$*$/u.test(a);
+const is_param = a => is_str(a) && /^\$*$/u.test(a);
 
 const vm = () => {
-	const flatten1 = (...list) => {
-		const [begin1, end1] = [, , list] = flatten(...list);
+	const serialize1 = (...list) => {
+		const [begin1, end1] = [, , list] = serialize(...list);
 		return list.map(a => a === begin1 ? begin : a === end1 ? end : a);
 	};
-	const unflatten1 = list => unflatten(begin, end, list);
-	const encode = (...list) => flatten1(...list).map(a => {
+	const deserialize1 = list => deserialize(begin, end, list);
+	const encode = (...list) => serialize1(...list).map(a => {
 		const buffer = is_buffer(a);
 		return buffer ? buffer2bin(buffer) : is_str(a) ? str2bin(a) : a;
 	});
-	const decode = list => unflatten1(list.map(a => is_str(a) ? bin2buffer(a) : a));
-	const emit = (...signal) => reflexion0.emit(...encode(...signal));
-	const escape = list => list.map(a => is_token(a) ? "$" + a : a);
-	const unescape = list => list.map(a => {
-		if(a === "") throw SyntaxError("Invalid encoding");
-		return is_token(a) ? a.slice(1) : a;
-	});
+	const decode = list => deserialize1(list.map(a => is_str(a) ? bin2buffer(a) : a));
+	const escape = list => list.map(a => is_param(a) ? "$" + a : a);
+	const unescape = list => list.map(a => is_param(a) ? a.slice(1) : a);
 	const match = (target, pattern) => {
-		const f = (pattern, ...list) => {
-			if(pattern === "") return args.push(list);
-			if(list.length > 1) return;
-			if(!Array.isArray(pattern) || !Array.isArray(list[0])) return escape(list).includes(pattern);
-			if(pattern.length > list[0].length + 1) return;
-			if(!pattern.length) return !list[0].length;
-			return list[0].splice(0, pattern.length - 1).map(a => [a]).concat(list).every((a, i) => f(pattern[i], ...a));
+		const f = (pattern, target, ...tail) => {
+			if(pattern === "") return args.push([target, ...tail]);
+			if(tail.length) return;
+			if(![pattern, target].every(Array.isArray)) return escape([target]).includes(pattern);
+			if(pattern.length > target.length + 1) return;
+			if(!pattern.length) return !target.length;
+			return target.splice(0, pattern.length - 1).map(a => [a]).concat([target]).every((a, i) => f(pattern[i], ...a));
 		};
 		const args = [];
 		if(f(pattern, target)) return args;
 	};
-	const apply = (effect, ...args) => reflexion0.emit(...[].concat(...flatten1(...effect).map(a =>
-		is_token(a) ? a.length < args.length ? args[a.length] : a.slice(args.length) : a
+	const apply = (effect, ...args) => reflexion0.emit(...[].concat(...serialize1(...effect).map(a =>
+		is_param(a) ? a.length < args.length ? args[a.length] : a.slice(args.length) : a
 	)));
+	const emit = (...signal) => reflexion0.emit(...encode(...signal));
 	const begin = Symbol();
 	const end = Symbol();
 	const reflexion0 = reflexion();
 	const handles = multi_key_map();
 	reflexion0.on("reflex", (...list) => {
 		if(handles.get(...list)) return;
-		const self = unflatten1(list);
-		const list1 = Array.isArray(self[0]) ? flatten1(...self[0]) : [];
-		const path = unescape(list1.slice(0, list1.concat("").indexOf("")));
-		handles.set(...list, reflexion0.on(...path, (...target) =>
-			match(target = unflatten1(path.concat(target)), self[0]) && apply(self.slice(1), self, target)
+		const [pattern, ...effect] = deserialize1(list);
+		if(!Array.isArray(pattern)) return;
+		const path0 = serialize1(...pattern);
+		const path1 = unescape(path0.slice(0, path0.concat("").indexOf("")));
+		handles.set(...list, reflexion0.on(...path1, (...target) =>
+			match(target = deserialize1(path1.concat(target)), pattern) && apply(effect, [pattern, ...effect], target)
 		));
 	});
 	reflexion0.on("unreflex", (...list) => {
@@ -221,16 +212,16 @@ const vm = () => {
 		handles.set(...list, undefined);
 	});
 	reflexion0.on("match", (...args) => {
-		const [target, pattern, effect0, ...effect1] = unflatten1(args);
+		const [target, pattern, effect0, ...effect1] = deserialize1(args);
 		args = match(target, pattern);
 		if(!args) return apply(effect1);
 		if(Array.isArray(effect0)) apply(effect0, ...args);
 	});
 	reflexion0.on("escape", (...list) => {
-		const [target, ...effect] = unflatten1(list);
-		apply(effect, unflatten1(escape(flatten1(target))));
+		const [target, ...effect] = deserialize1(list);
+		apply(effect, deserialize1(escape(serialize1(target))));
 	});
-	reflexion0.on("do", (...list) => unflatten1(list).forEach(signal => Array.isArray(signal) && reflexion0.emit(...flatten1(...signal))));
+	reflexion0.on("start", (...list) => deserialize1(list).filter(Array.isArray).forEach(signal => reflexion0.emit(...serialize1(...signal))));
 	return {
 		emit,
 		on: (...path) => {
@@ -239,7 +230,7 @@ const vm = () => {
 			const m = path.slice().reverse().concat(0).findIndex(a => a !== end);
 			return reflexion0.on(...path.slice(0, path.length - m), (...list) => reflex(...decode(Array(m).fill(begin).concat(list))));
 		},
-		exec: code => code2signals(code).forEach(signal => Array.isArray(signal) && emit(...signal)),
+		exec: code => emit("start", ...code2signals(code)),
 	};
 };
 
@@ -249,13 +240,13 @@ const buffer_or = buffer_fn((a, b) => new Uint8Array(Math.max(a.length, b.length
 
 const buffer_xor = buffer_fn((a, b) => new Uint8Array(Math.max(a.length, b.length)).map((_, i) => (a[i] || 0xff) ^ (b[i] || 0x00)));
 
-const uint_trim = buffer_fn(a => {
-	let i = a.length;
-	while(!a[i - 1] && i) i -= 1;
-	return a.slice(0, i);
+const uint_trim = buffer_fn(uint => {
+	let i = uint.length;
+	while(!uint[i - 1] && i) i -= 1;
+	return uint.slice(0, i);
 });
 
-const uint_fn = f => (...args) => uint_trim(f(...args.map(a => new Uint8Array(uint_trim(a)))).buffer);
+const uint_fn = f => (...uints) => uint_trim(f(...uints.map(uint => new Uint8Array(uint_trim(uint)))).buffer);
 
 const uint_add = uint_fn((a, b) => {
 	const result = new Uint8Array(Math.max(a.length, b.length) + 1);
@@ -268,7 +259,7 @@ const uint_add = uint_fn((a, b) => {
 });
 
 const uint_cmp = (a, b) => {
-	[a, b] = [a, b].map(a => new Uint8Array(uint_trim(a)));
+	[a, b] = [a, b].map(uint => new Uint8Array(uint_trim(uint)));
 	if(a.length !== b.length) return Math.sign(a.length - b.length);
 	for(let i = a.length - 1; i >= 0; i -= 1){
 		const cmp = Math.sign(a[i] - b[i]);
@@ -326,11 +317,11 @@ const same_lists = (...lists) => {
 
 const uint2num = uint => {
 	uint = new Uint8Array(uint_trim(uint));
-	const length = Number.MAX_SAFE_INTEGER.toString(2).length;
-	if(uint.length > Math.ceil(length / 8) || uint.subarray(-1)[0] & ~((1 << length % 8) - 1)) throw RangeError("Not safe");
-	let result = 0;
-	uint.reverse().forEach(a => result = result * 0x100 + a);
-	return result;
+	const top = Number.MAX_SAFE_INTEGER.toString(2).length;
+	if(uint.length > Math.ceil(top / 8) || uint.subarray(-1)[0] & ~((1 << top % 8) - 1)) throw RangeError("Not safe");
+	let number = 0;
+	uint.reverse().forEach(a => number = number * 0x100 + a);
+	return number;
 };
 
 const stdvm = () => {
@@ -349,7 +340,7 @@ const stdvm = () => {
 		return defn(...path, args => f(...args.splice(0, length)));
 	};
 	const defop_2 = defop(2);
-	const bin_fn = f => (...args) => args.every(is_buffer) && f(...args);
+	const bin_fn = f => (...buffers) => buffers.every(is_buffer) && f(...buffers);
 	const literal_map = new Map([
 		[true, "T"],
 		[false, "F"],
@@ -368,7 +359,7 @@ const stdvm = () => {
 	defop_2("bin", "|", bin_fn((a, b) => [buffer_or(a, b)]));
 	defop_2("bin", "^", bin_fn((a, b) => [buffer_xor(a, b)]));
 
-	let uint_s = new ArrayBuffer;
+	let uint_iota = new ArrayBuffer;
 	const uint_1 = num2uint(1);
 	defop(1)("uint", "trim", bin_fn(uint => [uint_trim(uint)]));
 	defop_2("uint", "=", bin_fn((...uints) => [literal_map.get(same_lists(...uints.map(uint_trim)))]));
@@ -380,9 +371,17 @@ const stdvm = () => {
 	defop_2("uint", ">", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) > 0)]));
 	defop_2("uint", "<=", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) <= 0)]));
 	defop_2("uint", ">=", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) >= 0)]));
-	defn("uint", "iota", () => [uint_s = uint_add(uint_s, uint_1)]);
+	defn("uint", "iota", () => [uint_iota = uint_add(uint_iota, uint_1)]);
 
 	vm0.exec(`
+		;[reflex [reflex $0 $0] match [$1] [reflex [emit $2] $2] _ match [[$1] $1] [$2 [$2] $2]
+		;	[escape [$2 [$3]] match $5 [$6 $6]
+		;		[escape $7 match $8 [$9] reflex $6 start
+		;			
+		;		]
+		;	]
+		;]
+
 		;[reflex [reflex $0 $0] [match [$1] [reflex [emit $2] $2] [] [match [[$1] $1] [$2 [$2] $2] [
 		;	[escape [$2 $3] [match $5 [$6 $6] [
 		;		[escape 
@@ -395,11 +394,11 @@ const stdvm = () => {
 
 const utf8_to_str = utf8 => {
 	utf8 = new Uint8Array(utf8);
-	let result = "";
+	let string = "";
 	for(let i = 0; i < utf8.length; i += 1){
 		const byte = utf8[i];
 		if(!(byte & 0x80)){
-			result += String.fromCodePoint(byte);
+			string += String.fromCodePoint(byte);
 			continue;
 		}
 		const length = byte.toString(2).indexOf("0");
@@ -411,13 +410,13 @@ const utf8_to_str = utf8 => {
 			point = (point << 6) | utf8[i] & 0x3f;
 		}
 		if(point < (1 << 4 * length + 1)) throw SyntaxError("Invalid encoding");
-		result += String.fromCodePoint(point);
+		string += String.fromCodePoint(point);
 	};
-	return result;
+	return string;
 };
 
 const signals2code = (options = {}) => (...signals) => {
-	const [begin, end, list] = flatten(...signals);
+	const [begin, end, list] = serialize(...signals);
 	return list
 	.map(a => {
 		if(a === begin) return "[ \t";
@@ -430,7 +429,7 @@ const signals2code = (options = {}) => (...signals) => {
 			if(!is_str(a)) return "%" + Array.from(new Uint8Array(buffer)).map(a => a.toString(16).padStart(2, "0")).join("");
 		}
 		if(!is_str(a)) throw TypeError("Unsupported");
-		if(is_token(a)) try{
+		if(is_param(a)) try{
 			if(str2num(a.length.toString()) === a.length) return "$" + a.length;
 		}catch(error){}
 		return /^\\|^%|^\$\d|[[;`\s\0-\u{1f}\u{7f}\]]/u.test(a) ? "`" + a
@@ -456,6 +455,6 @@ const cvm = log => {
 ({vm, stdvm, cvm});
 
 /*test*
-var vm0 = cvm(console.log);
-vm0.on((...signal) => console.log("signal", signals2code({utf8_to_str: true})(...signal)));
+var vm0 = cvm(message => console.log("log: " + message));
+vm0.on((...signal) => console.log("signal: " + signals2code({utf8_to_str: true})(...signal)));
 //*/
