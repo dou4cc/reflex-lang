@@ -180,7 +180,7 @@ const vm = () => {
 		return buffer ? buffer2bin(buffer) : is_str(a) ? str2bin(a) : a;
 	});
 	const decode = list => unflatten1(list.map(a => is_str(a) ? bin2buffer(a) : a));
-	const emit = (...signals) => signals.forEach(signal => Array.isArray(signal) && reflexion0.emit(...encode(...signal)));
+	const emit = (...signal) => reflexion0.emit(...encode(...signal));
 	const escape = list => list.map(a => is_token(a) ? "$" + a : a);
 	const unescape = list => list.map(a => {
 		if(a === "") throw SyntaxError("Invalid encoding");
@@ -228,7 +228,7 @@ const vm = () => {
 	});
 	reflexion0.on("escape", (...list) => {
 		const [target, ...effect] = unflatten1(list);
-		apply(effect, ...unflatten1(escape(flatten1(target))));
+		apply(effect, unflatten1(escape(flatten1(target))));
 	});
 	reflexion0.on("do", (...list) => unflatten1(list).forEach(signal => Array.isArray(signal) && reflexion0.emit(...flatten1(...signal))));
 	return {
@@ -239,7 +239,7 @@ const vm = () => {
 			const m = path.slice().reverse().concat(0).findIndex(a => a !== end);
 			return reflexion0.on(...path.slice(0, path.length - m), (...list) => reflex(...decode(Array(m).fill(begin).concat(list))));
 		},
-		exec: code => emit(...code2signals(code)),
+		exec: code => code2signals(code).forEach(signal => Array.isArray(signal) && emit(...signal)),
 	};
 };
 
@@ -341,7 +341,7 @@ const stdvm = () => {
 			try{
 				results = [...f(effect)];
 			}catch(error){}
-			if(results) vm0.emit(["match", results, [""], effect]);
+			if(results) vm0.emit("match", results, [""], effect);
 		});
 	};
 	const defop = length => (...path) => {
@@ -356,13 +356,13 @@ const stdvm = () => {
 	]);
 	const vm0 = vm();
 
-	vm0.on("defer", (...signals) => Promise.resolve().then(() => run(() => vm0.emit(...signals))));
+	vm0.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm0.emit(...signal))));
 	defop_2("=", (a, b) => [literal_map.get(same_lists(a, b))]);
-	defop_2("&", (...args) => {
-		const every = args.every(is_buffer);
-		args = args.map(a => is_buffer(a) ? new Uint8Array(a) : a);
-		return every ? [new Uint8Array([].concat(...args)).buffer] : [].concat(...args.map(a => [...a]));
-	});
+	defop_2("+", (...args) =>
+		args.every(is_buffer)
+		? [new Uint8Array([].concat(...args.map(a => Array.from(new Uint8Array(a))))).buffer]
+		: [].concat(...args.map(a => is_buffer(a) ? Array.from(new Uint8Array(a)).map(a => new Uint8Array([a]).buffer) : [...a]))
+	);
 
 	defop_2("bin", "&", bin_fn((a, b) => [buffer_and(a, b)]));
 	defop_2("bin", "|", bin_fn((a, b) => [buffer_or(a, b)]));
@@ -444,14 +444,18 @@ const signals2code = (options = {}) => (...signals) => {
 
 const cvm = log => {
 	const vm = stdvm();
+	if(log) vm.on("log", (...message) => {
+		try{
+			message = signals2code({utf8_to_str: true})(...message);
+		}catch(error){}
+		if(is_str(message)) log(message);
+	});
 	return vm;
 };
 
 ({vm, stdvm, cvm});
 
 /*test*
-var signals2code0 = signals2code({utf8_to_str: true});
-var vm0 = stdvm();
-vm0.on("test", "echo", (...args) => console.log(signals2code0(...args)));
-//vm0.on((...signals) => console.log("signal", signals2code0(...signals)));
+var vm0 = cvm(console.log);
+vm0.on((...signal) => console.log("signal", signals2code({utf8_to_str: true})(...signal)));
 //*/
