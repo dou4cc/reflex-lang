@@ -333,7 +333,7 @@ const stdvm = () => {
 			try{
 				results = [...f(effect)];
 			}catch(error){}
-			if(results) vm.emit("return", results, ...effect);
+			if(results) vm.emit("bind", results, ...effect);
 		});
 	};
 	const defop = length => (...path) => {
@@ -342,7 +342,7 @@ const stdvm = () => {
 	};
 	const defop_2 = defop(2);
 	const bin_fn = f => (...buffers) => buffers.every(is_buffer) && f(...buffers);
-	const literal_map = new Map([
+	const symbols = new Map([
 		[true, "T"],
 		[false, "F"],
 	]);
@@ -361,22 +361,34 @@ const stdvm = () => {
 			]
 		]
 
-		[reflex [return [$0] $0] match [$1] [return $2 $2]
+		[reflex [bind [$0] $0] match [$1] [bind $2 $2]
 			[match $2 [$4] [$3]]
 		]
 
-		[reflex [list? $0] match [$1] [list? [$2] $2] [return [T] $3] match [$1] [list? $2 $2]
-			[return [F] $3]
+		[reflex [list? $0] match [$1] [list? [$2] $2] [bind [T] $3] match [$1] [list? $2 $2]
+			[bind [F] $3]
 		]
+
+		;[reflex [fn $0] escape [$1] match $2 [fn $3 [$3 $3] [$3] $3]
+		;	[escape [[$6] $7] match $8 [[$9] $9]
+		;		[bind [[$5] match [$3 $12] [$4 $5] [$9]] $10]
+		;	]
+		;]
+
+		[fn _ [_ defn $0 $0 $0] [fn $0 $1 [$2] reflex $0] reflex $0]
+
+		[fn _ [_ undefn $0 $0 $0] [fn $0 $1 [$2] unreflex $0] reflex $0]
 	`);
 
-	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm0.emit(...signal))));
-	defop_2("=", (a, b) => [literal_map.get(same_lists(a, b))]);
+	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm.emit(...signal))));
+	defop_2("=", (a, b) => [symbols.get(same_lists(a, b))]);
 	defop_2("+", (...args) =>
 		args.every(is_buffer)
 		? [new Uint8Array([].concat(...args.map(a => Array.from(new Uint8Array(a))))).buffer]
 		: [].concat(...args.map(a => is_buffer(a) ? Array.from(new Uint8Array(a)).map(a => new Uint8Array([a]).buffer) : [...a]))
 	);
+	defop(3)("slice", (a, b, list) => Array.isArray(list) && list.slice(...[a, b].map(uint2num)));
+	defop(1)("length", list => Array.isArray(list) && [num2uint(list.length)]);
 
 	defop_2("bin", "&", bin_fn((a, b) => [buffer_and(a, b)]));
 	defop_2("bin", "|", bin_fn((a, b) => [buffer_or(a, b)]));
@@ -385,18 +397,19 @@ const stdvm = () => {
 	let uint_iota = new ArrayBuffer;
 	const uint_1 = num2uint(1);
 	defop(1)("uint", "trim", bin_fn(uint => [uint_trim(uint)]));
-	defop_2("uint", "=", bin_fn((...uints) => [literal_map.get(same_lists(...uints.map(uint_trim)))]));
+	defop_2("uint", "=", bin_fn((...uints) => [symbols.get(same_lists(...uints.map(uint_trim)))]));
 	defop_2("uint", "+", bin_fn((a, b) => [uint_add(a, b)]));
 	defop_2("uint", "-", bin_fn((a, b) => [uint_sub(a, b)]));
 	defop_2("uint", "*", bin_fn((a, b) => [uint_mul(a, b)]));
 	defop_2("uint", "/", bin_fn((a, b) => [uint_div(a, b), uint_mod(a, b)]));
-	defop_2("uint", "<", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) < 0)]));
-	defop_2("uint", ">", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) > 0)]));
-	defop_2("uint", "<=", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) <= 0)]));
-	defop_2("uint", ">=", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) >= 0)]));
+	defop_2("uint", "<", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) < 0)]));
+	defop_2("uint", ">", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) > 0)]));
+	defop_2("uint", "<=", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) <= 0)]));
+	defop_2("uint", ">=", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) >= 0)]));
 	defn("uint", "iota", () => [uint_iota = uint_add(uint_iota, uint_1)]);
 
 	vm.exec(`
+		
 	`);
 	return vm;
 };
