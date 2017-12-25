@@ -387,8 +387,10 @@ const stdvm = () => {
 		? [new Uint8Array([].concat(...args.map(a => Array.from(new Uint8Array(a))))).buffer]
 		: [].concat(...args.map(a => is_buffer(a) ? Array.from(new Uint8Array(a)).map(a => new Uint8Array([a]).buffer) : [...a]))
 	);
-	defop(3)("slice", (a, b, list) => [a, b].every(is_buffer) && Array.isArray(list) && list.slice(...[a, b].map(uint2num)));
-	defop(1)("length", list => Array.isArray(list) && [num2uint(list.length)]);
+	defop(3)("slice", (a, b, list) => [a, b].every(is_buffer) && ([a, b] = [a, b].map(uint2num)) && (
+		Array.isArray(list) ? list.slice(a, b) : [is_buffer(list).slice(a, b)]
+	));
+	defop(1)("length", list => [num2uint(Array.isArray(list) ? list.length : is_buffer(list).byteLength)]);
 
 	defop_2("bin", "&", bin_fn((a, b) => [buffer_and(a, b)]));
 	defop_2("bin", "|", bin_fn((a, b) => [buffer_or(a, b)]));
