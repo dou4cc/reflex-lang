@@ -7,7 +7,7 @@ const serialize = (...list) => {
 	return [begin, end, f(list)];
 };
 
-const deserialize = (begin, end, list) => {
+const deserialize = (begin, end, [...list]) => {
 	const pos = list.lastIndexOf(begin);
 	if(pos < 0){
 		if(list.includes(end)) throw SyntaxError("Invalid token");
