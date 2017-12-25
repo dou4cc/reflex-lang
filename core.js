@@ -162,7 +162,7 @@ const is_str = a => typeof a === "string";
 
 const is_param = a => is_str(a) && /^\$*$/u.test(a);
 
-const vm = () => {
+const minvm = () => {
 	const serialize1 = (...list) => {
 		const [begin1, end1] = [, , list] = serialize(...list);
 		return list.map(a => a === begin1 ? begin : a === end1 ? end : a);
@@ -182,6 +182,7 @@ const vm = () => {
 			if(![pattern, target].every(Array.isArray)) return escape([target]).includes(pattern);
 			if(pattern.length > target.length + 1) return;
 			if(!pattern.length) return !target.length;
+			target = target.slice();
 			return target.splice(0, pattern.length - 1).map(a => [a]).concat([target]).every((a, i) => f(pattern[i], ...a));
 		};
 		const args = [];
@@ -327,12 +328,12 @@ const uint2num = uint => {
 const stdvm = () => {
 	const defn = (...path) => {
 		const f = path.pop();
-		return vm0.on(...path, (...effect) => {
+		return vm.on(...path, (...effect) => {
 			let results;
 			try{
 				results = [...f(effect)];
 			}catch(error){}
-			if(results) vm0.emit("match", results, [""], effect);
+			if(results) vm.emit("return", results, ...effect);
 		});
 	};
 	const defop = length => (...path) => {
@@ -345,23 +346,31 @@ const stdvm = () => {
 		[true, "T"],
 		[false, "F"],
 	]);
-	const vm0 = vm();
+	const vm = minvm();
 
-	vm0.exec(`
-		[reflex [reflex $0 $0] match [$1] [reflex [emit $2] $2] _ match [[$1] $1] [$2 reflex [$2] $2]
-			[escape [$2 $3] match $5 [$6 $6]
+	vm.exec(`
+		[reflex [reflex [$0] $0] match [$1] [reflex [emit $2] $2] _ match [[$1] $1] [[reflex $2] reflex [$2] $2]
+			[escape [[reflex $2] $3] match $5 [$6 $6]
 				[escape $6 reflex [emit $7] start $8]
 			]
 		]
 
-		[reflex [unreflex $0 $0] match [$1] [unreflex [emit $2] $2] _ match [[$1] $1] [$2 unreflex [$2] $2]
-			[escape [$2 $3] match $5 [$6 $6]
+		[reflex [unreflex [$0] $0] match [$1] [unreflex [emit $2] $2] _ match [[$1] $1] [[unreflex $2] unreflex [$2] $2]
+			[escape [[reflex $2] $3] match $5 [$6 $6]
 				[escape $6 unreflex [emit $7] start $8]
 			]
 		]
+
+		[reflex [return [$0] $0] match [$1] [return $2 $2]
+			[match $2 [$4] [$3]]
+		]
+
+		[reflex [list? $0] match [$1] [list? [$2] $2] [return [T] $3] match [$1] [list? $2 $2]
+			[return [F] $3]
+		]
 	`);
 
-	vm0.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm0.emit(...signal))));
+	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm0.emit(...signal))));
 	defop_2("=", (a, b) => [literal_map.get(same_lists(a, b))]);
 	defop_2("+", (...args) =>
 		args.every(is_buffer)
@@ -387,9 +396,9 @@ const stdvm = () => {
 	defop_2("uint", ">=", bin_fn((a, b) => [literal_map.get(uint_cmp(a, b) >= 0)]));
 	defn("uint", "iota", () => [uint_iota = uint_add(uint_iota, uint_1)]);
 
-	vm0.exec(`
+	vm.exec(`
 	`);
-	return vm0;
+	return vm;
 };
 
 const utf8_to_str = utf8 => {
@@ -452,9 +461,4 @@ const cvm = log => {
 	return vm;
 };
 
-({vm, stdvm, cvm});
-
-/*test*
-var vm0 = cvm(message => console.log("log: " + message));
-vm0.on((...signal) => console.log("signal: " + signals2code({utf8_to_str: true})(...signal)));
-//*/
+({minvm, stdvm, cvm});
