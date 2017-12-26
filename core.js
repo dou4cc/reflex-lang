@@ -49,6 +49,8 @@ const str2num = (a, radix = 10) => {
 	return a;
 };
 
+const hex2buffer = hex => new Uint8Array(Array(hex.length / 2)).map((a, i) => str2num(hex.substr(i * 2, 2).replace(/^(?:0(?!$))*/u, ""), 16)).buffer;
+
 const ast2signals = ast => {
 	const [begin, end, tokens] = serialize(...ast);
 	return deserialize(begin, end, tokens.map(token => {
@@ -56,10 +58,7 @@ const ast2signals = ast => {
 		let {value} = token;
 		if(!token.flag){
 			if(/^\\/u.test(value)) return num2uint(str2num(value.slice(1)));
-			if(/^%/u.test(value)){
-				value = value.slice(1);
-				return new Uint8Array(Array(value.length / 2)).map((a, i) => str2num(value.substr(i * 2, 2).replace(/^(?:0(?!$))*/u, ""), 16)).buffer;
-			}
+			if(/^%/u.test(value)) return hex2buffer(value.slice(1));
 			if(/^\$\d/u.test(value)) value = "$".repeat(str2num(value.slice(1)));
 		}
 		return value;
@@ -325,6 +324,8 @@ const uint2num = uint => {
 	return number;
 };
 
+const buffer_concat = buffer_fn((...buffers) => new Uint8Array([].concat(...buffers.map(Array.from))));
+
 const stdvm = () => {
 	const defn = (...path) => {
 		const f = path.pop();
@@ -384,12 +385,14 @@ const stdvm = () => {
 	defop_2("=", (a, b) => [symbols.get(same_lists(a, b))]);
 	defop_2("+", (...args) =>
 		args.every(is_buffer)
-		? [new Uint8Array([].concat(...args.map(a => Array.from(new Uint8Array(a))))).buffer]
+		? [buffer_concat(...args)]
 		: [].concat(...args.map(a => is_buffer(a) ? Array.from(new Uint8Array(a)).map(a => new Uint8Array([a]).buffer) : [...a]))
 	);
-	defop(3)("slice", (a, b, list) => [a, b].every(is_buffer) && ([a, b] = [a, b].map(uint2num)) && (
-		Array.isArray(list) ? list.slice(a, b) : [is_buffer(list).slice(a, b)]
-	));
+	defop(3)("slice", (a, b, list) => {
+		if(![a, b].every(is_buffer)) return;
+		[a, b] = [a, b].map(uint2num);
+		return Array.isArray(list) ? list.slice(a, b) : [is_buffer(list).slice(a, b)];
+	});
 	defop(1)("length", list => [num2uint(Array.isArray(list) ? list.length : is_buffer(list).byteLength)]);
 
 	defop_2("bin", "&", bin_fn((a, b) => [buffer_and(a, b)]));
@@ -439,6 +442,8 @@ const utf8_to_str = utf8 => {
 	return string;
 };
 
+const buffer2hex = buffer => Array.from(new Uint8Array(buffer)).map(a => a.toString(16).padStart(2, "0")).join("");
+
 const signals2code = (options = {}) => (...signals) => {
 	const [begin, end, list] = serialize(...signals);
 	return list
@@ -450,7 +455,7 @@ const signals2code = (options = {}) => (...signals) => {
 			if(options.utf8_to_str) try{
 				a = utf8_to_str(buffer);
 			}catch(error){}
-			if(!is_str(a)) return "%" + Array.from(new Uint8Array(buffer)).map(a => a.toString(16).padStart(2, "0")).join("");
+			if(!is_str(a)) return "%" + buffer2hex(buffer);
 		}
 		if(!is_str(a)) throw TypeError("Unsupported");
 		if(is_param(a)) try{
