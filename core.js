@@ -382,15 +382,15 @@ const stdvm = () => {
 			[bind [match [$2 $5] [$6 $6] [$4]] $3 $5]
 		]
 
-		;[defn _ [_ match? $0] call [$0] [escape [$0]] match [[$0 $1] $1] [$2 $2 $2 $2]
-		;	[call $2 escape [$5] match [$6 $7] [[[$8 $8 $8] $8 $8] [$8]]
+		;[defn _ [_ match? $0] call [$0] [escape [$0]] match [[$1 $2] $2] [$3 [$3 $3 $3]]
+		;	[call $3 escape [$6] match [$7 $8] [[[$9 $9 $9] [$9 $9]] [$9]]
 		;		[start
-		;			[reflex [_ match? $11 $9] start
-		;				[unreflex $14]
-		;				[bind [T] $13]
+		;			[reflex [_ match? $12 $10] start
+		;				[unreflex $15]
+		;				[bind [T] $14]
 		;			]
-		;			[match $8 $9 _ bind [F] $10]
-		;			[_ match? $8 $8]
+		;			[match $9 $10 _ bind [F] $11]
+		;			[_ match? $9 $9]
 		;		]
 		;	]
 		;]
