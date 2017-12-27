@@ -382,18 +382,24 @@ const stdvm = () => {
 			[bind [match [$2 $5] [$6 $6] [$4]] $3 $5]
 		]
 
-		;[defn _ [_ match? $0] call [$0] [escape [$0]] match [[$1 $2] $2] [$3 [$3 $3 $3]]
-		;	[call $3 escape [$6] match [$7 $8] [[[$9 $9 $9] [$9 $9]] [$9]]
-		;		[start
-		;			[reflex [_ match? $12 $10] start
-		;				[unreflex $15]
-		;				[bind [T] $14]
-		;			]
-		;			[match $9 $10 _ bind [F] $11]
-		;			[_ match? $9 $9]
-		;		]
-		;	]
-		;]
+		[defn _ [_ match? $0] call [$0] [escape [$0]] match [[$1 $2] $2] [$3 [$3 $3 $3]]
+			[call $3 [escape [$6]] match [$7 $8] [[[$9 $9 $9] [$9 $9]] [$9]]
+				[start
+					[reflex [_ match? $12 $10] start
+						[unreflex $15]
+						[bind [T] $14]
+					]
+					[match $9 $10 _ start
+						[unreflex [_ match? $12 $10] start
+							[unreflex $15]
+							[bind [T] $14]
+						]
+						[bind [F] $11]
+					]
+					[_ match? $9 $9]
+				]
+			]
+		]
 	`);
 
 	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm.emit(...signal))));
@@ -497,3 +503,8 @@ const cvm = log => {
 };
 
 ({minvm, stdvm, cvm});
+
+/*test*
+var vm = cvm(message => console.log("log: " + message));
+vm.on((...signal) => console.log("signal: " + signals2code({utf8_to_str: true})(...signal)));
+//*/
