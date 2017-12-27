@@ -370,15 +370,30 @@ const stdvm = () => {
 			[bind [F] $3]
 		]
 
-		;[reflex [fn $0] escape [$1] match $2 [fn $3 [$3 $3] [$3] $3]
-		;	[escape [[$6] $7] match $8 [[$9] $9]
-		;		[bind [[$5] match [$3 $12] [$4 $5] [$9]] $10]
+		[reflex [fn $0] escape [$1] match $2 [fn $3 [$3 $3] $3 $3]
+			[escape [match [$3 $8] [$4 $5] $6] bind [[$5] start $8] $7]
+		]
+
+		[fn _ [_ defn $0 $0 $0] [fn $0 $1 [$2] reflex $3] reflex $0]
+
+		[fn _ [_ undefn $0 $0 $0] [fn $0 $1 [$2] unreflex $3] reflex $0]
+
+		[defn _ [_ call $0] escape [$0] match $1 [$2 [$2] $2]
+			[bind [match [$2 $5] [$6 $6] [$4]] $3 $5]
+		]
+
+		;[defn _ [_ match? $0] call [$0] [escape [$0]] match [[$0 $1] $1] [$2 $2 $2 $2]
+		;	[call $2 escape [$5] match [$6 $7] [[[$8 $8 $8] $8 $8] [$8]]
+		;		[start
+		;			[reflex [_ match? $11 $9] start
+		;				[unreflex $14]
+		;				[bind [T] $13]
+		;			]
+		;			[match $8 $9 _ bind [F] $10]
+		;			[_ match? $8 $8]
+		;		]
 		;	]
 		;]
-
-		[fn _ [_ defn $0 $0 $0] [fn $0 $1 [$2] reflex $0] reflex $0]
-
-		[fn _ [_ undefn $0 $0 $0] [fn $0 $1 [$2] unreflex $0] reflex $0]
 	`);
 
 	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm.emit(...signal))));
