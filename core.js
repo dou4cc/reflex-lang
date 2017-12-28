@@ -18,7 +18,7 @@ const deserialize = (begin, end, [...list]) => {
 };
 
 const code2ast = code => {
-	code = code.replace(/\r\n?/gu, "\n");
+	code = code.replace(/\r\n?/gu, "\n").trim();
 	const tokens = code.match(/`(?:\\`|[^`])*`|[[\]]|(?:(?![[;`\]])\S)+|;.*/gu) || [];
 	return deserialize("[", "]", tokens.filter(token => !/^;/u.test(token)).map(token => {
 		if(/^[[\]]$/u.test(token)) return token;
@@ -324,7 +324,7 @@ const uint2num = uint => {
 	return number;
 };
 
-const buffer_concat = buffer_fn((...buffers) => new Uint8Array([].concat(...buffers.map(Array.from))));
+const buffer_concat = buffer_fn((...buffers) => new Uint8Array([].concat(...buffers.map(a => Array.from(a)))));
 
 const stdvm = () => {
 	const defn = (...path) => {
@@ -366,10 +366,6 @@ const stdvm = () => {
 			[match $2 [$4] [$3]]
 		]
 
-		[reflex [list? $0] match [$1] [list? [$2] $2] [bind [T] $3] match [$1] [list? $2 $2]
-			[bind [F] $3]
-		]
-
 		[reflex [fn $0] escape [$1] match $2 [fn $3 [$3 $3] $3 $3]
 			[escape [match [$3 $8] [$4 $5] $6] bind [[$5] start $8] $7]
 		]
@@ -382,24 +378,22 @@ const stdvm = () => {
 			[bind [match [$2 $5] [$6 $6] [$4]] $3 $5]
 		]
 
-		[defn _ [_ match? $0] call [$0] [escape [$0]] match [[$1 $2] $2] [$3 [$3 $3 $3]]
-			[call $3 [escape [$6]] match [$7 $8] [[[$9 $9 $9] [$9 $9]] [$9]]
-				[start
-					[reflex [_ match? $12 $10] start
-						[unreflex $15]
-						[bind [T] $14]
-					]
-					[match $9 $10 _ start
-						[unreflex [_ match? $12 $10] start
-							[unreflex $15]
-							[bind [T] $14]
+		[defn _ [_ match? $0] call [$0] [escape [$0]] match [$1 $2] [[$3] [$3 $3 $3]]
+			[call [$4 $3] [escape [$6]] match [$7 $8] [[$9 $9 $9 $9] [$9]]
+				[match [[[_ match? $9 $11] start [unreflex $14] [bind [T] $13] ] $10 $11 $12] [[$14] $14 $14 $14]
+					[start
+						[reflex $14]
+						[_ match? $15 $15]
+						[match $15 $16 _ start
+							[unreflex $14]
+							[bind [F] $17]
 						]
-						[bind [F] $11]
 					]
-					[_ match? $9 $9]
 				]
 			]
 		]
+
+		[defn _ [_ list? $0 $0] call [$1] [match? $0 [$2]] bind [$3] start $2]
 	`);
 
 	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm.emit(...signal))));
