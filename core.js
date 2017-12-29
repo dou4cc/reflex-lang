@@ -188,7 +188,7 @@ const minvm = () => {
 		if(f(pattern, target)) return args;
 	};
 	const apply = (effect, ...args) => reflexion0.emit(...[].concat(...serialize1(...effect).map(a =>
-		is_param(a) ? a.length < args.length ? args[a.length] : a.slice(args.length) : a
+		is_param(a) ? a.length < args.length ? serialize1(...args[a.length]) : a.slice(args.length) : a
 	)));
 	const emit = (...signal) => reflexion0.emit(...encode(...signal));
 	const begin = Symbol();
