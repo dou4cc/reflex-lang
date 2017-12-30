@@ -393,6 +393,35 @@ const stdvm = () => {
 		]
 
 		[defn _ [_ list? $0 $0] call [$1] [match? $0 [$2]] bind [$3] start $2]
+
+		[defn _ [_ ? $0 $0 $0 $0]
+			match $0 T [bind [$1] $3]
+			match $0 F [bind [$2] $3]
+		]
+
+		[defn _ [_ & $0 $0 $0]
+			match [$0 $1] [T T] [bind [T] $2]
+			match [$0 $1] [T F] [bind [F] $2]
+			match [$0 $1] [F T] [bind [F] $2]
+			match [$0 $1] [F F] [bind [F] $2]
+		]
+
+		[defn _ [_ | $0 $0 $0]
+			match [$0 $1] [T T] [bind [T] $2]
+			match [$0 $1] [T F] [bind [T] $2]
+			match [$0 $1] [F T] [bind [T] $2]
+			match [$0 $1] [F F] [bind [F] $2]
+		]
+
+		[defn _ [_ ! $0 $0]
+			match $0 T [bind [F] $1]
+			match $0 F [bind [T] $1]
+		]
+
+		[defn _ [_ ns [$0] $0 $0] start
+			[match [$1 $0] [[$3] $3] [$4 $3]]
+			[ns [$0] $2]
+		]
 	`);
 
 	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm.emit(...signal))));
