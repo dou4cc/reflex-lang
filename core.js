@@ -418,9 +418,9 @@ const stdvm = () => {
 			match $0 F [bind [T] $1]
 		]
 
-		[defn _ [_ ns [$0] $0 $0] start
+		[defn _ [_ path [$0] $0 $0] start
 			[match [$1 $0] [[$3] $3] [$4 $3]]
-			[ns [$0] $2]
+			[path [$0] $2]
 		]
 	`);
 
