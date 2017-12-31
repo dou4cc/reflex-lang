@@ -175,13 +175,13 @@ const minvm = () => {
 	const escape = list => list.map(a => is_param(a) ? "$" + a : a);
 	const unescape = list => list.map(a => is_param(a) ? a.slice(1) : a);
 	const match = (target, pattern) => {
-		const f = (pattern, target, ...tail) => {
-			if(pattern === "") return args.push([target, ...tail]);
-			if(tail.length) return;
-			if(![pattern, target].every(Array.isArray)) return escape([target]).includes(pattern);
-			if(pattern.length > target.length + 1) return;
-			if(!pattern.length) return !target.length;
-			target = target.slice();
+		const f = (pattern, ...list) => {
+			if(pattern === "") return args.push(list);
+			if(list.length > 1) return;
+			if(![pattern, ...list].every(Array.isArray)) return escape(list).includes(pattern);
+			if(pattern.length > list[0].length + 1) return;
+			if(!pattern.length) return !list[0].length;
+			const target = list[0].slice();
 			return target.splice(0, pattern.length - 1).map(a => [a]).concat([target]).every((a, i) => f(pattern[i], ...a));
 		};
 		const args = [];
@@ -309,15 +309,6 @@ const uint_div = uint_fn((a, b) => {
 
 const uint_mod = (a, b) => uint_sub(a, uint_mul(uint_div(a, b), b));
 
-const same_lists = (...lists) => {
-	if(!Array.isArray(lists[0])) return lists.splice(1).every(a => {
-		const [buffer0, buffer1] = lists.concat([a]).map(is_buffer);
-		return lists.includes(a) || buffer0 && buffer1 && buffer2bin(buffer0) === buffer2bin(buffer1);
-	});
-	if(!lists.slice(1).every(a => Array.isArray(a) && a.length === lists[0].length)) return false;
-	return lists[0].every((_, i) => same_lists(...lists.map(list => list[i])));
-};
-
 const uint2num = uint => {
 	uint = new Uint8Array(uint_trim(uint));
 	const top = Number.MAX_SAFE_INTEGER.toString(2).length;
@@ -374,25 +365,27 @@ const stdvm = () => {
 		[fn _ [_ undefn $0 $0 $0] [fn $0 $1 [$2] unreflex $3] reflex $0]
 
 		[defn _ [_ call $0] escape [$0] match $1 [$2 [$2] $2]
-			[bind [match [$2 $5] [$6 $6] [$4]] $3 $5]
+			[bind [match [$2 $5] [$6] [$4]] $3 $5]
 		]
 
-		[defn _ [_ match? $0] call [$0] [escape [$0]] match [$1 $2] [[$3] [$3 $3 $3]]
-			[call [$4 $3] [escape [$6]] match [$7 $8] [[$9 $9 $9 $9] [$9]]
-				[match [[[_ match? $9 $11] start [unreflex $14] [bind [T] $13] ] $10 $11 $12] [[$14] $14 $14 $14]
+		[defn _ [_ match? $0] call [$0] [escape [$0]] match [$1] [[$2] [$2 $2 $2]]
+			[call [$3 $2] [escape [$5]] match [$6] [[$7 $7 $7 $7] [$7]]
+				[match [[[_ match? $7 $9] start [unreflex $12] [bind [T] $11] ] $8 $9 $10] [[$12] $12 $12 $12]
 					[start
-						[reflex $14]
-						[_ match? $15 $15]
-						[match $15 $16 _ start
-							[unreflex $14]
-							[bind [F] $17]
+						[reflex $12]
+						[_ match? $13 $13]
+						[match $13 $14 _ start
+							[unreflex $12]
+							[bind [F] $15]
 						]
 					]
 				]
 			]
 		]
 
-		[defn _ [_ list? $0 $0] call [$1] [match? $0 [$2]] bind [$3] start $2]
+		[defn _ [_ list? $0 $0] call [$1] [match? $0 [$2]] match [$2] [[$3] $3]
+			[bind [$4] $3]
+		]
 
 		[defn _ [_ ? $0 $0 $0 $0]
 			match $0 T [bind [$1] $3]
@@ -418,14 +411,42 @@ const stdvm = () => {
 			match $0 F [bind [T] $1]
 		]
 
-		[defn _ [_ path [$0] $0 $0] start
+		[defn _ [_ scope [$0] $0 $0] start
 			[match [$1 $0] [[$3] $3] [$4 $3]]
-			[path [$0] $2]
+			[scope [$0] $2]
 		]
+
+		[defn _ [_ alias $0] escape [$0] match $1 [[$2] $2]
+			[defn _ [_ $2 $4] $3 $4]
+		]
+
+		[defn _ [_ unalias $0] escape [$0] match $1 [[$2] $2]
+			[undefn _ [_ $2 $4] $3 $4]
+		]
+
+		[defn _ [_ = $0 $0 $0] call [$0 $2] [escape $1] match [$3] [[$4 $4] $4]
+			[match? $4 $6 $5]
+		]
+
+		[defn _ [_ _ eval [$0] [] $0] $0 $1]
+
+		[defn _ [_ _ eval [$0] [$0 $0] $0] match [[$0] [$1 $2] $3] [$4 [[$4] $4] $4]
+			[call [$4 [$6] $7] [$5] match [$8] [[[$9] $9 $9] $9]
+				[_ eval [$9 $12] $10 $11]
+			]
+			_ eval [$0 $1] [$2] $3
+		]
+
+		[defn _ [_ eval $0 $0] _ eval [] $0 $1]
+
+		[defn _ [_ quote $0 $0] bind $0 $1]
+
+		[defn _ [_ head [$0 $0] $0] bind [$0] $2]
+
+		[defn _ [_ tail [$0 $0] $0] bind [$1] $2]
 	`);
 
 	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm.emit(...signal))));
-	defop_2("=", (a, b) => [symbols.get(same_lists(a, b))]);
 	defop_2("+", (...args) =>
 		args.every(is_buffer)
 		? [buffer_concat(...args)]
@@ -445,11 +466,11 @@ const stdvm = () => {
 	let uint_iota = new ArrayBuffer;
 	const uint_1 = num2uint(1);
 	defop(1)("uint", "trim", bin_fn(uint => [uint_trim(uint)]));
-	defop_2("uint", "=", bin_fn((...uints) => [symbols.get(same_lists(...uints.map(uint_trim)))]));
 	defop_2("uint", "+", bin_fn((a, b) => [uint_add(a, b)]));
 	defop_2("uint", "-", bin_fn((a, b) => [uint_sub(a, b)]));
 	defop_2("uint", "*", bin_fn((a, b) => [uint_mul(a, b)]));
 	defop_2("uint", "/", bin_fn((a, b) => [uint_div(a, b), uint_mod(a, b)]));
+	defop_2("uint", "=", bin_fn((a, b) => [symbols.get(!uint_cmp(a, b))]));
 	defop_2("uint", "<", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) < 0)]));
 	defop_2("uint", ">", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) > 0)]));
 	defop_2("uint", "<=", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) <= 0)]));
@@ -457,7 +478,7 @@ const stdvm = () => {
 	defn("uint", "iota", () => [uint_iota = uint_add(uint_iota, uint_1)]);
 
 	vm.exec(`
-		
+		[defn _ [_ at $0 $0 $0] eval [slice $0 [uint + $0 \\1] [quote [$1]]] $2]
 	`);
 	return vm;
 };
