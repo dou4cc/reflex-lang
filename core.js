@@ -328,7 +328,7 @@ const stdvm = () => {
 			try{
 				results = [...f(effect)];
 			}catch(error){}
-			if(results) vm.emit("bind", results, ...effect);
+			if(results) vm.emit("quote", results, ...effect);
 		});
 	};
 	const defop = length => (...path) => {
@@ -337,6 +337,7 @@ const stdvm = () => {
 	};
 	const defop_2 = defop(2);
 	const bin_fn = f => (...buffers) => buffers.every(is_buffer) && f(...buffers);
+	const length = list => Array.isArray(list) ? list.length : is_buffer(list).byteLength;
 	const symbols = new Map([
 		[true, "T"],
 		[false, "F"],
@@ -352,12 +353,12 @@ const stdvm = () => {
 			[escape [reflex [$3] $4] unreflex [emit $3] start $5]
 		]
 
-		[reflex [bind [$0] $0] match [$1] [bind $2 $2]
+		[reflex [quote [$0] $0] match [$1] [quote $2 $2]
 			[match $2 [$4] [$3]]
 		]
 
 		[reflex [fn $0] escape [$1] match $2 [fn $3 [$3 $3] $3 $3]
-			[escape [match [$3 $8] [$4 $5] $6] bind [[$5] start $8] $7]
+			[escape [match [$3 $8] [$4 $5] $6] quote [[$5] start $8] $7]
 		]
 
 		[fn _ [_ defn $0 $0 $0] [fn $0 $1 [$2] reflex $3] reflex $0]
@@ -365,18 +366,18 @@ const stdvm = () => {
 		[fn _ [_ undefn $0 $0 $0] [fn $0 $1 [$2] unreflex $3] reflex $0]
 
 		[defn _ [_ call $0] escape [$0] match $1 [$2 [$2] $2]
-			[bind [match [$2 $5] [$6] [$4]] $3 $5]
+			[quote [match [$2 $5] [$6] [$4]] $3 $5]
 		]
 
 		[defn _ [_ match? $0] call [$0] [escape [$0]] match [$1] [[$2] [$2 $2 $2]]
 			[call [$3 $2] [escape [$5]] match [$6] [[$7 $7 $7 $7] [$7]]
-				[match [[[_ match? $7 $9] start [unreflex $12] [bind [T] $11] ] $8 $9 $10] [[$12] $12 $12 $12]
+				[match [[[_ match? $7 $9] start [unreflex $12] [quote [T] $11] ] $8 $9 $10] [[$12] $12 $12 $12]
 					[start
 						[reflex $12]
 						[_ match? $13 $13]
 						[match $13 $14 _ start
 							[unreflex $12]
-							[bind [F] $15]
+							[quote [F] $15]
 						]
 					]
 				]
@@ -384,31 +385,31 @@ const stdvm = () => {
 		]
 
 		[defn _ [_ list? $0 $0] call [$1] [match? $0 [$2]] match [$2] [[$3] $3]
-			[bind [$4] $3]
+			[quote [$4] $3]
 		]
 
-		[defn _ [_ ? $0 $0 $0 $0]
-			match $0 T [bind [$1] $3]
-			match $0 F [bind [$2] $3]
+		[defn _ [_ cond $0 $0 $0 $0]
+			match $0 T [quote [$1] $3]
+			match $0 F [quote [$2] $3]
 		]
 
 		[defn _ [_ & $0 $0 $0]
-			match [$0 $1] [T T] [bind [T] $2]
-			match [$0 $1] [T F] [bind [F] $2]
-			match [$0 $1] [F T] [bind [F] $2]
-			match [$0 $1] [F F] [bind [F] $2]
+			match [$0 $1] [T T] [quote [T] $2]
+			match [$0 $1] [T F] [quote [F] $2]
+			match [$0 $1] [F T] [quote [F] $2]
+			match [$0 $1] [F F] [quote [F] $2]
 		]
 
 		[defn _ [_ | $0 $0 $0]
-			match [$0 $1] [T T] [bind [T] $2]
-			match [$0 $1] [T F] [bind [T] $2]
-			match [$0 $1] [F T] [bind [T] $2]
-			match [$0 $1] [F F] [bind [F] $2]
+			match [$0 $1] [T T] [quote [T] $2]
+			match [$0 $1] [T F] [quote [T] $2]
+			match [$0 $1] [F T] [quote [T] $2]
+			match [$0 $1] [F F] [quote [F] $2]
 		]
 
 		[defn _ [_ ! $0 $0]
-			match $0 T [bind [F] $1]
-			match $0 F [bind [T] $1]
+			match $0 T [quote [F] $1]
+			match $0 F [quote [T] $1]
 		]
 
 		[defn _ [_ scope [$0] $0 $0] start
@@ -438,12 +439,6 @@ const stdvm = () => {
 		]
 
 		[defn _ [_ eval $0 $0] _ eval [] $0 $1]
-
-		[defn _ [_ quote $0 $0] bind $0 $1]
-
-		[defn _ [_ head [$0 $0] $0] bind [$0] $2]
-
-		[defn _ [_ tail [$0 $0] $0] bind [$1] $2]
 	`);
 
 	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm.emit(...signal))));
@@ -455,9 +450,10 @@ const stdvm = () => {
 	defop(3)("slice", (a, b, list) => {
 		if(![a, b].every(is_buffer)) return;
 		[a, b] = [a, b].map(uint2num);
+		if(a > b || b > length(list)) return;
 		return Array.isArray(list) ? list.slice(a, b) : [is_buffer(list).slice(a, b)];
 	});
-	defop(1)("length", list => [num2uint(Array.isArray(list) ? list.length : is_buffer(list).byteLength)]);
+	defop(1)("length", list => [num2uint(length(list))]);
 
 	defop_2("bin", "&", bin_fn((a, b) => [buffer_and(a, b)]));
 	defop_2("bin", "|", bin_fn((a, b) => [buffer_or(a, b)]));
@@ -478,7 +474,17 @@ const stdvm = () => {
 	defn("uint", "iota", () => [uint_iota = uint_add(uint_iota, uint_1)]);
 
 	vm.exec(`
-		[defn _ [_ at $0 $0 $0] eval [slice $0 [uint + $0 \\1] [quote [$1]]] $2]
+		[defn _ [_ at $0 $0 $0] eval [slice [quote [$0]] [uint + $0 \\1] [quote [$1]]] $2]
+
+		[defn _ [_ last-slice $0 $0 $0 $0] eval [slice [eval [uint - [length $2] [quote [$1]]]] [eval [uint - [length $2] [quote [$0]]]] [quote [$2]]] $3]
+
+		[defn _ [_ cut $0 $0 $0] eval [slice [quote [$0]] [length $1] [quote [$1]]] $2]
+
+		[defn _ [_ last-cut $0 $0 $0] eval [last-slice [quote [$0]] [length $1] [quote [$1]]] $2]
+
+		[alias [head] at \\0]
+
+		[alias [tail] cut \\1]
 	`);
 	return vm;
 };
@@ -549,5 +555,5 @@ const cvm = log => {
 
 /*test*
 var vm = cvm(message => console.log("log: " + message));
-vm.on((...signal) => console.log("signal: " + signals2code({utf8_to_str: true})(...signal)));
+//vm.on((...signal) => console.log("signal: " + signals2code({utf8_to_str: true})(...signal)));
 //*/
