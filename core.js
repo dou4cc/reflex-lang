@@ -320,6 +320,15 @@ const uint2num = uint => {
 
 const buffer_concat = buffer_fn((...buffers) => new Uint8Array([].concat(...buffers.map(a => Array.from(a)))));
 
+const uuid = () => {
+	let d = Date.now() + performance.now();
+	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/x|y/gu, c => {
+		const r = Math.floor(d + Math.random() * 16) % 16;
+		d /= 16;
+		return (c === "x" ? r : r & 0x3 | 0x8).toString(16);
+	});
+};
+
 const stdvm = () => {
 	const defn = (...path) => {
 		const f = path.pop();
@@ -454,6 +463,7 @@ const stdvm = () => {
 		return Array.isArray(list) ? list.slice(a, b) : [is_buffer(list).slice(a, b)];
 	});
 	defop(1)("length", list => [num2uint(length(list))]);
+	defn("uuid", () => [uuid()]);
 
 	defop_2("bin", "&", bin_fn((a, b) => [buffer_and(a, b)]));
 	defop_2("bin", "|", bin_fn((a, b) => [buffer_or(a, b)]));
