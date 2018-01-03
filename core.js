@@ -354,8 +354,12 @@ const stdvm = () => {
 	const vm = minvm();
 
 	vm.exec(`
-		[reflex [reflex [$0] $0] match [$1] [reflex [emit $2] $2] _ escape [$1] match $2 [reflex [$3] $3]
-			[escape [reflex [$3] $4] reflex [emit $3] start $5]
+		[match
+			[reflex [reflex [$0] $0] match [$1] [reflex [emit $2] $2] _ escape [$1] match $2 [reflex [$3] $3]
+				[escape [reflex [$3] $4] reflex [emit $3] start $5]
+			]
+			$0
+			[start $0 $0]
 		]
 
 		[reflex [unreflex [$0] $0] match [$1] [unreflex [emit $2] $2] _ escape [$1] match $2 [unreflex [$3] $3]
