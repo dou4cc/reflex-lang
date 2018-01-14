@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 const serialize = (...list) => {
 	const begin = Symbol();
@@ -320,13 +320,12 @@ const uint2num = uint => {
 
 const buffer_concat = buffer_fn((...buffers) => new Uint8Array([].concat(...buffers.map(a => Array.from(a)))));
 
-const uuid = () => {
-	let d = Date.now() + performance.now();
-	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/x|y/gu, c => {
-		const r = Math.floor(d + Math.random() * 16) % 16;
-		d /= 16;
-		return (c === "x" ? r : r & 0x3 | 0x8).toString(16);
-	});
+const uuid = (prefix = new ArrayBuffer, padding = 0) => {
+};
+
+const uint_counter = () => {
+	let i = num2uint(0);
+	return () => i = uint_add(i, num2uint(1));
 };
 
 const stdvm = () => {
@@ -467,14 +466,12 @@ const stdvm = () => {
 		return Array.isArray(list) ? list.slice(a, b) : [is_buffer(list).slice(a, b)];
 	});
 	defop(1)("length", list => [num2uint(length(list))]);
-	defn("uuid", () => [uuid()]);
 
 	defop_2("bin", "&", bin_fn((a, b) => [buffer_and(a, b)]));
 	defop_2("bin", "|", bin_fn((a, b) => [buffer_or(a, b)]));
 	defop_2("bin", "^", bin_fn((a, b) => [buffer_xor(a, b)]));
 
-	let uint_iota = new ArrayBuffer;
-	const uint_1 = num2uint(1);
+	const uint_iota = uint_counter();
 	defop(1)("uint", "trim", bin_fn(uint => [uint_trim(uint)]));
 	defop_2("uint", "+", bin_fn((a, b) => [uint_add(a, b)]));
 	defop_2("uint", "-", bin_fn((a, b) => [uint_sub(a, b)]));
@@ -485,7 +482,7 @@ const stdvm = () => {
 	defop_2("uint", ">", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) > 0)]));
 	defop_2("uint", "<=", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) <= 0)]));
 	defop_2("uint", ">=", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) >= 0)]));
-	defn("uint", "iota", () => [uint_iota = uint_add(uint_iota, uint_1)]);
+	defn("uint", "iota", () => [uint_iota()]);
 
 	vm.exec(`
 		[defn _ [_ at $0 $0 $0] eval [slice [quote [$0]] [uint + $0 \\1] [quote [$1]]] $2]
@@ -552,6 +549,15 @@ const signals2code = (options = {}) => (...signals) => {
 	})
 	.join(" ")
 	.replace(/ (?:\t )+/gu, "");
+};
+
+const guid = () => {
+	let d = Date.now();
+	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/x|y/gu, c => {
+		const r = Math.floor(d + Math.random() * 16) % 16;
+		d /= 16;
+		return (c === "x" ? r : r & 0x3 | 0x8).toString(16);
+	});
 };
 
 const cvm = log => {
