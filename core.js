@@ -311,10 +311,31 @@ const uint2num = uint => {
 const buffer_concat = buffer_fn((...buffers) => new Uint8Array([].concat(...buffers.map(a => Array.from(a)))));
 
 const buffer_uuid = free => {
+	const check = () => used || children.size || free && run(free);
 	let used;
 	const children = new Map;
 	return {
-		
+		alloc: () => {
+			if(!used){
+				used = true;
+				return new ArrayBuffer;
+			}
+			const buffer = new Uint8Array([Math.random() * 0xff]).buffer;
+			const binary = buffer2bin(buffer);
+			if(!children.has(binary)) children.set(binary, buffer_uuid(() => {
+				children.delete(binary);
+				check();
+			}));
+			return buffer_concat(buffer, children.get(byte).alloc());
+		},
+		free: uuid => {
+			if(uuid.byteLength){
+				(children.get(buffer2bin(uuid.slice(0, 1))) || {free(){}}).free(uuid.slice(1));
+			}else{
+				used = false;
+			}
+			check();
+		},
 	};
 };
 
