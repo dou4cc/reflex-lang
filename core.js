@@ -78,7 +78,7 @@ const run = f => {
 };
 
 const reflexion = free => {
-	const off = () => children.size || reflexes.size || free && run(free);
+	const check = () => children.size || reflexes.size || free && run(free);
 	const children = new Map;
 	const reflexes = new Set;
 	return {
@@ -87,51 +87,41 @@ const reflexion = free => {
 			if(list.length) (children.get(list[0]) || {emit(){}}).emit(...list.slice(1));
 			reflexes1.forEach(f => reflexes.has(f) && f(...list));
 		},
-		on: (...rest) => {
-			const first = rest.shift();
-			if(!rest.length){
-				const reflex = (...args) => run(() => first(...args));
-				reflexes.add(reflex);
-				return () => {
-					reflexes.delete(reflex);
-					off();
-				};
+		on: (first, ...rest) => {
+			if(rest.length){
+				if(!children.has(first)) children.set(first, reflexion(() => {
+					children.delete(first);
+					check();
+				}));
+				return children.get(first).on(...rest);
 			}
-			if(!children.has(first)) children.set(first, reflexion(() => {
-				children.delete(first);
-				off();
-			}));
-			return children.get(first).on(...rest);
+			const reflex = (...args) => run(() => first(...args));
+			reflexes.add(reflex);
+			return () => {
+				reflexes.delete(reflex);
+				check();
+			};
 		},
 	};
 };
 
-const multi_key_map = () => {
-	const dot = new Map;
-	const f = (node, keys) => node && keys.length ? f(node.get(keys.shift()), keys) : node;
+const path_map = free => {
+	const check = () => children.size || value === undefined && free && run(free);
+	let value;
+	const children = new Map;
 	return {
-		set: (...keys) => {
-			const [value] = keys.splice(-1, 1, dot);
-			const f = parent => {
-				const key = keys.shift();
-				if(value === undefined){
-					if(key !== dot){
-						const child = parent.get(key);
-						if(!child || !f(child)) return;
-					}
-					parent.delete(key);
-					return !parent.size;
-				}
-				if(key !== dot) return f(parent.get(key) || (() => {
-					const child = new Map;
-					parent.set(key, child);
-					return child;
-				})());
-				parent.set(key, value);
-			};
-			f(dot);
+		set: (first, ...rest) => {
+			if(rest.length){
+				if(!children.has(first)) children.set(first, path_map(() => {
+					children.delete(first);
+					check();
+				}));
+				return children.get(first).set(...rest);
+			}
+			value = first;
+			check();
 		},
-		get: (...keys) => f(dot, keys.concat(dot)),
+		get: (...path) => path.length ? (children.get(path.shift()) || {get(){}}).get(...path) : value,
 	};
 };
 
@@ -197,7 +187,7 @@ const minvm = () => {
 	const begin = Symbol();
 	const end = Symbol();
 	const reflexion0 = reflexion();
-	const handles = multi_key_map();
+	const handles = path_map();
 	reflexion0.on("reflex", (...list) => {
 		if(handles.get(...list)) return;
 		const [pattern, ...effect] = deserialize1(list);
@@ -320,7 +310,12 @@ const uint2num = uint => {
 
 const buffer_concat = buffer_fn((...buffers) => new Uint8Array([].concat(...buffers.map(a => Array.from(a)))));
 
-const uuid = (prefix = new ArrayBuffer, padding = 0) => {
+const buffer_uuid = free => {
+	let used;
+	const children = new Map;
+	return {
+		
+	};
 };
 
 const uint_counter = () => {
@@ -551,13 +546,13 @@ const signals2code = (options = {}) => (...signals) => {
 	.replace(/ (?:\t )+/gu, "");
 };
 
-const guid = () => {
+const buffer_guid = () => {
 	let d = Date.now();
-	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/x|y/gu, c => {
+	return hex2buffer("xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx".replace(/x|y/gu, c => {
 		const r = Math.floor(d + Math.random() * 16) % 16;
 		d /= 16;
 		return (c === "x" ? r : r & 0x3 | 0x8).toString(16);
-	});
+	}));
 };
 
 const cvm = log => {
