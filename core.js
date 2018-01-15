@@ -320,21 +320,25 @@ const buffer_uuid = free => {
 				used = true;
 				return new ArrayBuffer;
 			}
-			const buffer = new Uint8Array([Math.random() * 0xff]).buffer;
-			const binary = buffer2bin(buffer);
-			if(!children.has(binary)) children.set(binary, buffer_uuid(() => {
-				children.delete(binary);
+			const byte = new Uint8Array([Math.random() * 0xff]).buffer;
+			const key = buffer2bin(byte);
+			if(!children.has(key)) children.set(key, buffer_uuid(() => {
+				children.delete(key);
 				check();
 			}));
-			return buffer_concat(buffer, children.get(byte).alloc());
+			return buffer_concat(byte, children.get(key).alloc());
 		},
 		free: uuid => {
 			if(uuid.byteLength){
-				(children.get(buffer2bin(uuid.slice(0, 1))) || {free(){}}).free(uuid.slice(1));
-			}else{
-				used = false;
+				const key = buffer2bin(uuid.slice(0, 1));
+				return children.has(key) && children.get(key).free(uuid.slice(1));
 			}
-			check();
+			if(used){
+				used = false;
+				check();
+				return true;
+			}
+			return false;
 		},
 	};
 };
@@ -567,14 +571,16 @@ const signals2code = (options = {}) => (...signals) => {
 	.replace(/ (?:\t )+/gu, "");
 };
 
-const buffer_guid = () => {
+const guid = () => {
 	let d = Date.now();
-	return hex2buffer("xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx".replace(/x|y/gu, c => {
+	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/x|y/gu, c => {
 		const r = Math.floor(d + Math.random() * 16) % 16;
 		d /= 16;
 		return (c === "x" ? r : r & 0x3 | 0x8).toString(16);
-	}));
+	});
 };
+
+const buffer_guid = () => hex2buffer(guid().replace(/-/gu, ""));
 
 const cvm = log => {
 	const vm = stdvm();
