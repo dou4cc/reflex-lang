@@ -151,7 +151,7 @@ const is_str = a => typeof a === "string";
 
 const is_param = a => is_str(a) && /^\$*$/u.test(a);
 
-const minvm = () => {
+const vm_min = () => {
 	const serialize1 = (...list) => {
 		const [begin1, end1] = [, , list] = serialize(...list);
 		return list.map(a => a === begin1 ? begin : a === end1 ? end : a);
@@ -331,47 +331,48 @@ const buffer_uuid = free => {
 		free: uuid => {
 			if(uuid.byteLength){
 				const key = buffer2bin(uuid.slice(0, 1));
-				return children.has(key) && children.get(key).free(uuid.slice(1));
+				if(children.has(key)) children.get(key).free(uuid.slice(1));
+				return;
 			}
-			if(used){
-				used = false;
-				check();
-				return true;
-			}
-			return false;
+			used = false;
+			check();
 		},
 	};
 };
+
+const vm_defn = vm => (...path) => {
+	const f = path.pop();
+	return vm.on(...path, (...effect) => {
+		let results;
+		try{
+			results = [...f(effect)];
+		}catch(error){}
+		if(results) vm.emit("quote", results, ...effect);
+	});
+};
+
+const vm_defop = defn => (length, ...path) => {
+	const f = path.pop();
+	return defn(...path, args => f(...args.splice(0, length)));
+};
+	
+const vm_symbol = a => new Map([
+	[true, "T"],
+	[false, "F"],
+]).get(a);
 
 const uint_counter = () => {
 	let i = num2uint(0);
 	return () => i = uint_add(i, num2uint(1));
 };
 
-const stdvm = () => {
-	const defn = (...path) => {
-		const f = path.pop();
-		return vm.on(...path, (...effect) => {
-			let results;
-			try{
-				results = [...f(effect)];
-			}catch(error){}
-			if(results) vm.emit("quote", results, ...effect);
-		});
-	};
-	const defop = length => (...path) => {
-		const f = path.pop();
-		return defn(...path, args => f(...args.splice(0, length)));
-	};
-	const defop_2 = defop(2);
+const vm_std = () => {
+	const vm = vm_min();
+	const defn = vm_defn(vm);
+	const defop = vm_defop(defn);
 	const bin_fn = f => (...buffers) => buffers.every(is_buffer) && f(...buffers);
 	const length = list => Array.isArray(list) ? list.length : is_buffer(list).byteLength;
-	const symbols = new Map([
-		[true, "T"],
-		[false, "F"],
-	]);
-	const vm = minvm();
-
+	
 	vm.exec(`
 		[match
 			[reflex [reflex [$0] $0] match [$1] [reflex [emit $2] $2] _ escape [$1] match $2 [reflex [$3] $3]
@@ -380,27 +381,27 @@ const stdvm = () => {
 			$0
 			[start $0 $0]
 		]
-
+		
 		[reflex [unreflex [$0] $0] match [$1] [unreflex [emit $2] $2] _ escape [$1] match $2 [unreflex [$3] $3]
 			[escape [reflex [$3] $4] unreflex [emit $3] start $5]
 		]
-
+		
 		[reflex [quote [$0] $0] match [$1] [quote $2 $2]
 			[match $2 [$4] [$3]]
 		]
-
+		
 		[reflex [fn $0] escape [$1] match $2 [fn $3 [$3 $3] $3 $3]
 			[escape [match [$3 $8] [$4 $5] $6] quote [[$5] start $8] $7]
 		]
-
+		
 		[fn _ [_ defn $0 $0 $0] [fn $0 $1 [$2] reflex $3] reflex $0]
-
+		
 		[fn _ [_ undefn $0 $0 $0] [fn $0 $1 [$2] unreflex $3] reflex $0]
-
+		
 		[defn _ [_ call $0] escape [$0] match $1 [$2 [$2] $2]
 			[quote [match [$2 $5] [$6] [$4]] $3 $5]
 		]
-
+		
 		[defn _ [_ match? $0] call [$0] [escape [$0]] match [$1] [[$2] [$2 $2 $2]]
 			[call [$3 $2] [escape [$5]] match [$6] [[$7 $7 $7 $7] [$7]]
 				[match [[[_ match? $7 $9] start [unreflex $12] [quote [T] $11] ] $8 $9 $10] [[$12] $12 $12 $12]
@@ -415,65 +416,70 @@ const stdvm = () => {
 				]
 			]
 		]
-
-		[defn _ [_ list? $0 $0] call [$1] [match? $0 [$2]] match [$2] [[$3] $3]
+		
+		[defn _ [_ list ? $0 $0] call [$1] [match? $0 [$2]] match [$2] [[$3] $3]
 			[quote [$4] $3]
 		]
-
+		
 		[defn _ [_ cond $0 $0 $0 $0]
 			match $0 T [quote [$1] $3]
 			match $0 F [quote [$2] $3]
 		]
-
+		
 		[defn _ [_ & $0 $0 $0]
 			match [$0 $1] [T T] [quote [T] $2]
 			match [$0 $1] [T F] [quote [F] $2]
 			match [$0 $1] [F T] [quote [F] $2]
 			match [$0 $1] [F F] [quote [F] $2]
 		]
-
+		
 		[defn _ [_ | $0 $0 $0]
 			match [$0 $1] [T T] [quote [T] $2]
 			match [$0 $1] [T F] [quote [T] $2]
 			match [$0 $1] [F T] [quote [T] $2]
 			match [$0 $1] [F F] [quote [F] $2]
 		]
-
+		
 		[defn _ [_ ! $0 $0]
 			match $0 T [quote [F] $1]
 			match $0 F [quote [T] $1]
 		]
-
+		
 		[defn _ [_ scope [$0] $0 $0] start
 			[match [$1 $0] [[$3] $3] [$4 $3]]
 			[scope [$0] $2]
 		]
-
+		
 		[defn _ [_ alias $0] escape [$0] match $1 [[$2] $2]
 			[defn _ [_ $2 $4] $3 $4]
 		]
-
+		
 		[defn _ [_ unalias $0] escape [$0] match $1 [[$2] $2]
 			[undefn _ [_ $2 $4] $3 $4]
 		]
-
+		
 		[defn _ [_ = $0 $0 $0] call [$0 $2] [escape $1] match [$3] [[$4 $4] $4]
 			[match? $4 $6 $5]
 		]
-
+		
 		[defn _ [_ _ eval [$0] [] $0] $0 $1]
-
+		
 		[defn _ [_ _ eval [$0] [$0 $0] $0] match [[$0] [$1 $2] $3] [$4 [[$4] $4] $4]
 			[call [$4 [$6] $7] [$5] match [$8] [[[$9] $9 $9] $9]
 				[_ eval [$9 $12] $10 $11]
 			]
 			_ eval [$0 $1] [$2] $3
 		]
-
+		
 		[defn _ [_ eval $0 $0] _ eval [] $0 $1]
 	`);
 
 	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm.emit(...signal))));
+	
+	defop(2, "list", "concat", (a, b) => [a, b].every(Array.isArray) && a.concat(b));
+	defop(2, "list", "slice", (from, to, list) => Array.is(list) && list.slice(from, to));
+	defop(1, "list", "length", list => Array.isArray(list) && [num2uint(list.length)]);
+	
 	defop_2("+", (...args) =>
 		args.every(is_buffer)
 		? [buffer_concat(...args)]
@@ -486,35 +492,35 @@ const stdvm = () => {
 		return Array.isArray(list) ? list.slice(a, b) : [is_buffer(list).slice(a, b)];
 	});
 	defop(1)("length", list => [num2uint(length(list))]);
-
+	
 	defop_2("bin", "&", bin_fn((a, b) => [buffer_and(a, b)]));
 	defop_2("bin", "|", bin_fn((a, b) => [buffer_or(a, b)]));
 	defop_2("bin", "^", bin_fn((a, b) => [buffer_xor(a, b)]));
-
+	
 	const uint_iota = uint_counter();
-	defop(1)("uint", "trim", bin_fn(uint => [uint_trim(uint)]));
-	defop_2("uint", "+", bin_fn((a, b) => [uint_add(a, b)]));
-	defop_2("uint", "-", bin_fn((a, b) => [uint_sub(a, b)]));
-	defop_2("uint", "*", bin_fn((a, b) => [uint_mul(a, b)]));
-	defop_2("uint", "/", bin_fn((a, b) => [uint_div(a, b), uint_mod(a, b)]));
-	defop_2("uint", "=", bin_fn((a, b) => [symbols.get(!uint_cmp(a, b))]));
-	defop_2("uint", "<", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) < 0)]));
-	defop_2("uint", ">", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) > 0)]));
-	defop_2("uint", "<=", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) <= 0)]));
-	defop_2("uint", ">=", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) >= 0)]));
+	defop(1, "uint", "trim", bin_fn(uint => [uint_trim(uint)]));
+	defop(2, "uint", "+", bin_fn((a, b) => [uint_add(a, b)]));
+	defop(2, "uint", "-", bin_fn((a, b) => [uint_sub(a, b)]));
+	defop(2, "uint", "*", bin_fn((a, b) => [uint_mul(a, b)]));
+	defop(2, "uint", "/", bin_fn((a, b) => [uint_div(a, b), uint_mod(a, b)]));
+	defop(2, "uint", "=", bin_fn((a, b) => [symbols.get(!uint_cmp(a, b))]));
+	defop(2, "uint", "<", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) < 0)]));
+	defop(2, "uint", ">", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) > 0)]));
+	defop(2, "uint", "<=", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) <= 0)]));
+	defop(2, "uint", ">=", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) >= 0)]));
 	defn("uint", "iota", () => [uint_iota()]);
-
+	
 	vm.exec(`
 		[defn _ [_ at $0 $0 $0] eval [slice [quote [$0]] [uint + $0 \\1] [quote [$1]]] $2]
-
+		
 		[defn _ [_ last-slice $0 $0 $0 $0] eval [slice [eval [uint - [length $2] [quote [$1]]]] [eval [uint - [length $2] [quote [$0]]]] [quote [$2]]] $3]
-
+		
 		[defn _ [_ cut $0 $0 $0] eval [slice [quote [$0]] [length $1] [quote [$1]]] $2]
-
+		
 		[defn _ [_ last-cut $0 $0 $0] eval [last-slice [quote [$0]] [length $1] [quote [$1]]] $2]
-
+		
 		[alias [head] at \\0]
-
+		
 		[alias [tail] cut \\1]
 	`);
 	return vm;
@@ -580,10 +586,10 @@ const guid = () => {
 	});
 };
 
-const buffer_guid = () => hex2buffer(guid().replace(/-/gu, ""));
+const guid2buffer = guid => hex2buffer(guid.replace(/-/gu, ""));
 
-const cvm = log => {
-	const vm = stdvm();
+const vm_common = log => {
+	const vm = vm_std();
 	if(log) vm.on("log", (...message) => {
 		try{
 			message = signals2code({utf8_to_str: true})(...message);
@@ -593,9 +599,9 @@ const cvm = log => {
 	return vm;
 };
 
-({minvm, stdvm, cvm});
+({vm_min, vm_std, vm_common});
 
 /*test*
-var vm = cvm(message => console.log("log: " + message));
+var vm = vm_common(message => console.log("log: " + message));
 //vm.on((...signal) => console.log("signal: " + signals2code({utf8_to_str: true})(...signal)));
 //*/
