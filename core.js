@@ -426,28 +426,23 @@ const vm_std = () => {
 			match $0 F [quote [$2] $3]
 		]
 		
-		[defn _ [_ & $0 $0 $0]
+		[defn _ [_ and $0 $0 $0]
 			match [$0 $1] [T T] [quote [T] $2]
 			match [$0 $1] [T F] [quote [F] $2]
 			match [$0 $1] [F T] [quote [F] $2]
 			match [$0 $1] [F F] [quote [F] $2]
 		]
 		
-		[defn _ [_ | $0 $0 $0]
+		[defn _ [_ or $0 $0 $0]
 			match [$0 $1] [T T] [quote [T] $2]
 			match [$0 $1] [T F] [quote [T] $2]
 			match [$0 $1] [F T] [quote [T] $2]
 			match [$0 $1] [F F] [quote [F] $2]
 		]
 		
-		[defn _ [_ ! $0 $0]
+		[defn _ [_ not $0 $0]
 			match $0 T [quote [F] $1]
 			match $0 F [quote [T] $1]
-		]
-		
-		[defn _ [_ scope [$0] $0 $0] start
-			[match [$1 $0] [[$3] $3] [$4 $3]]
-			[scope [$0] $2]
 		]
 		
 		[defn _ [_ alias $0] escape [$0] match $1 [[$2] $2]
@@ -472,30 +467,25 @@ const vm_std = () => {
 		]
 		
 		[defn _ [_ eval $0 $0] _ eval [] $0 $1]
+		
+		[defn _ [_ head [$0 $0] $0] quote [$0] $2]
+		
+		[defn _ [_ tail [$0 $0] $0] quote $1 $2]
 	`);
 
 	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm.emit(...signal))));
 	
-	defop(2, "list", "concat", (a, b) => [a, b].every(Array.isArray) && a.concat(b));
-	defop(2, "list", "slice", (from, to, list) => Array.is(list) && list.slice(from, to));
 	defop(1, "list", "length", list => Array.isArray(list) && [num2uint(list.length)]);
+	defop(2, "list", "concat", (a, b) => [a, b].every(Array.isArray) && a.concat(b));
+	defop(3, "list", "slice", (begin, end, list) => Array.isArray(list) && list.slice(...[begin, end].map(uint2num)));
 	
-	defop_2("+", (...args) =>
-		args.every(is_buffer)
-		? [buffer_concat(...args)]
-		: [].concat(...args.map(a => is_buffer(a) ? Array.from(new Uint8Array(a)).map(a => new Uint8Array([a]).buffer) : [...a]))
-	);
-	defop(3)("slice", (a, b, list) => {
-		if(![a, b].every(is_buffer)) return;
-		[a, b] = [a, b].map(uint2num);
-		if(a > b || b > length(list)) return;
-		return Array.isArray(list) ? list.slice(a, b) : [is_buffer(list).slice(a, b)];
-	});
-	defop(1)("length", list => [num2uint(length(list))]);
-	
-	defop_2("bin", "&", bin_fn((a, b) => [buffer_and(a, b)]));
-	defop_2("bin", "|", bin_fn((a, b) => [buffer_or(a, b)]));
-	defop_2("bin", "^", bin_fn((a, b) => [buffer_xor(a, b)]));
+	defop(1, "binary", "?", a => vm_symbol(Boolean(is_buffer(binary))));
+	defop(1, "binary", "length", bin_fn(binary => [num2uint(binary.length)]));
+	defop(2, "binary", "&", bin_fn((a, b) => [buffer_and(a, b)]));
+	defop(2, "binary", "|", bin_fn((a, b) => [buffer_or(a, b)]));
+	defop(2, "binary", "^", bin_fn((a, b) => [buffer_xor(a, b)]));
+	defop(2, "binary", "concat", bin_fn((a, b) => [buffer_concat(a, b)]));
+	defop(3, "binary", "slice", (begin, end, binary) => is_buffer(binary) && [binary.slice(begin, end)]);
 	
 	const uint_iota = uint_counter();
 	defop(1, "uint", "trim", bin_fn(uint => [uint_trim(uint)]));
@@ -503,25 +493,26 @@ const vm_std = () => {
 	defop(2, "uint", "-", bin_fn((a, b) => [uint_sub(a, b)]));
 	defop(2, "uint", "*", bin_fn((a, b) => [uint_mul(a, b)]));
 	defop(2, "uint", "/", bin_fn((a, b) => [uint_div(a, b), uint_mod(a, b)]));
-	defop(2, "uint", "=", bin_fn((a, b) => [symbols.get(!uint_cmp(a, b))]));
-	defop(2, "uint", "<", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) < 0)]));
-	defop(2, "uint", ">", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) > 0)]));
-	defop(2, "uint", "<=", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) <= 0)]));
-	defop(2, "uint", ">=", bin_fn((a, b) => [symbols.get(uint_cmp(a, b) >= 0)]));
+	defop(2, "uint", "=", bin_fn((a, b) => [vm_symbol(!uint_cmp(a, b))]));
+	defop(2, "uint", "<", bin_fn((a, b) => [vm_symbol(uint_cmp(a, b) < 0)]));
+	defop(2, "uint", ">", bin_fn((a, b) => [vm_symbol(uint_cmp(a, b) > 0)]));
+	defop(2, "uint", "<=", bin_fn((a, b) => [vm_symbol(uint_cmp(a, b) <= 0)]));
+	defop(2, "uint", ">=", bin_fn((a, b) => [vm_symbol(uint_cmp(a, b) >= 0)]));
 	defn("uint", "iota", () => [uint_iota()]);
 	
 	vm.exec(`
-		[defn _ [_ at $0 $0 $0] eval [slice [quote [$0]] [uint + $0 \\1] [quote [$1]]] $2]
+		[defn _ [_ list at $0 $0 $0] eval [list slice [quote [$0]] [uint + $0 \\1] [quote [$1]]] $2]
 		
-		[defn _ [_ last-slice $0 $0 $0 $0] eval [slice [eval [uint - [length $2] [quote [$1]]]] [eval [uint - [length $2] [quote [$0]]]] [quote [$2]]] $3]
+		[defn _ [_ list last-slice $0 $0 $0 $0] eval [list slice
+			[eval [uint - [list length $2] [quote [$1]]]]
+			[eval [uint - [list length $2] [quote [$0]]]]
+			[quote [$2]]]
+			$3
+		]
 		
-		[defn _ [_ cut $0 $0 $0] eval [slice [quote [$0]] [length $1] [quote [$1]]] $2]
+		[defn _ [_ list cut $0 $0 $0] eval [list slice [quote [$0]] [list length $1] [quote [$1]]] $2]
 		
-		[defn _ [_ last-cut $0 $0 $0] eval [last-slice [quote [$0]] [length $1] [quote [$1]]] $2]
-		
-		[alias [head] at \\0]
-		
-		[alias [tail] cut \\1]
+		[defn _ [_ list last-cut $0 $0 $0] eval [list last-slice [quote [$0]] [list length $1] [quote [$1]]] $2]
 	`);
 	return vm;
 };
