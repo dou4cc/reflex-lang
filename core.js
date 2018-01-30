@@ -445,12 +445,15 @@ const vm_std = () => {
 			match $0 F [quote [T] $1]
 		]
 		
-		[defn _ [_ alias $0] escape [$0] match $1 [[$2] $2]
-			[defn _ [_ $2 $4] $3 $4]
+		[defn _ [_ list for-each [$0 $0] $0] start
+			[quote [$0] $2]
+			[list for-each [$1] $2]
 		]
 		
-		[defn _ [_ unalias $0] escape [$0] match $1 [[$2] $2]
-			[undefn _ [_ $2 $4] $3 $4]
+		[list for-each [[alias defn] [unalias undefn]] match $0 [$1 $1]
+			[defn _ [_ $1 $3] escape [$3] match $4 [[$5] $5]
+				[$2 _ [_ $5 $7] $6 $7]
+			]
 		]
 		
 		[defn _ [_ = $0 $0 $0] call [$0 $2] [escape $1] match [$3] [[$4 $4] $4]
@@ -470,14 +473,18 @@ const vm_std = () => {
 		
 		[defn _ [_ head [$0 $0] $0] quote [$0] $2]
 		
-		[defn _ [_ tail [$0 $0] $0] quote $1 $2]
+		[defn _ [_ tail [$0 $0] $0] quote [$1] $2]
 	`);
 
 	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm.emit(...signal))));
 	
 	defop(1, "list", "length", list => Array.isArray(list) && [num2uint(list.length)]);
 	defop(2, "list", "concat", (a, b) => [a, b].every(Array.isArray) && a.concat(b));
-	defop(3, "list", "slice", (begin, end, list) => Array.isArray(list) && list.slice(...[begin, end].map(uint2num)));
+	defop(3, "list", "slice", (begin, end, list) => {
+		if(!Array.isArray(list)) return;
+		[begin, end] = [begin, end].map(uint2num);
+		if(end <= list.length) return list.slice(begin, end);
+	});
 	
 	defop(1, "binary", "?", a => vm_symbol(Boolean(is_buffer(binary))));
 	defop(1, "binary", "length", bin_fn(binary => [num2uint(binary.length)]));
@@ -485,7 +492,15 @@ const vm_std = () => {
 	defop(2, "binary", "|", bin_fn((a, b) => [buffer_or(a, b)]));
 	defop(2, "binary", "^", bin_fn((a, b) => [buffer_xor(a, b)]));
 	defop(2, "binary", "concat", bin_fn((a, b) => [buffer_concat(a, b)]));
-	defop(3, "binary", "slice", (begin, end, binary) => is_buffer(binary) && [binary.slice(begin, end)]);
+	defop(3, "binary", "slice", (begin, end, binary) => {
+		if(!is_buffer(binary)) return;
+		[begin, end] = [begin, end].map(uint2num);
+		if(end <= binary.byteLength) return [binary.slice(begin, end)];
+	});
+	
+	const uuid = buffer_uuid();
+	defn("uuid", "alloc", () => [uuid.alloc()]);
+	vm.on("uuid", "free", (a, ...rest) => rest.length || is_buffer(a) && uuid.free(a));
 	
 	const uint_iota = uint_counter();
 	defop(1, "uint", "trim", bin_fn(uint => [uint_trim(uint)]));
@@ -501,18 +516,17 @@ const vm_std = () => {
 	defn("uint", "iota", () => [uint_iota()]);
 	
 	vm.exec(`
-		[defn _ [_ list at $0 $0 $0] eval [list slice [quote [$0]] [uint + $0 \\1] [quote [$1]]] $2]
-		
-		[defn _ [_ list last-slice $0 $0 $0 $0] eval [list slice
-			[eval [uint - [list length $2] [quote [$1]]]]
-			[eval [uint - [list length $2] [quote [$0]]]]
-			[quote [$2]]]
-			$3
+		[list for-each [list binary] start
+			[defn _ [_ $0 at $1 $1 $1] eval [$0 slice [quote [$1]] [uint + $1 \\1] [quote [$2]]] $3]
+			[defn _ [_ $0 last-slice $1 $1 $1 $1] eval [$0 slice
+				[eval [uint - [$0 length $3] [quote [$2]]]]
+				[eval [uint - [$0 length $3] [quote [$1]]]]
+				[quote [$3]]]
+				$4
+			]
+			[defn _ [_ $0 cut $1 $1 $1] eval [$0 slice [quote [$1]] [$0 length $2] [quote [$2]]] $3]
+			[defn _ [_ $0 last-cut $1 $1 $1] eval [$0 last-slice [quote [$1]] [$0 length $2] [quote [$2]]] $3]
 		]
-		
-		[defn _ [_ list cut $0 $0 $0] eval [list slice [quote [$0]] [list length $1] [quote [$1]]] $2]
-		
-		[defn _ [_ list last-cut $0 $0 $0] eval [list last-slice [quote [$0]] [list length $1] [quote [$1]]] $2]
 	`);
 	return vm;
 };
