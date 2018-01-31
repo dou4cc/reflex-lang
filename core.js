@@ -445,17 +445,6 @@ const vm_std = () => {
 			match $0 F [quote [T] $1]
 		]
 		
-		[defn _ [_ list for-each [$0 $0] $0] start
-			[quote [$0] $2]
-			[list for-each [$1] $2]
-		]
-		
-		[list for-each [[alias defn] [unalias undefn]] match $0 [$1 $1]
-			[defn _ [_ $1 $3] escape [$3] match $4 [[$5] $5]
-				[$2 _ [_ $5 $7] $6 $7]
-			]
-		]
-		
 		[defn _ [_ = $0 $0 $0] call [$0 $2] [escape $1] match [$3] [[$4 $4] $4]
 			[match? $4 $6 $5]
 		]
@@ -474,6 +463,17 @@ const vm_std = () => {
 		[defn _ [_ head [$0 $0] $0] quote [$0] $2]
 		
 		[defn _ [_ tail [$0 $0] $0] quote [$1] $2]
+		
+		[defn _ [_ for-each [$0 $0] $0] start
+			[quote [$0] $2]
+			[for-each [$1] $2]
+		]
+		
+		[for-each [[alias defn] [unalias undefn]] match $0 [$1 $1]
+			[defn _ [_ $1 $3] escape [$3] match $4 [[$5] $5]
+				[$2 _ [_ $5 $7] $6 $7]
+			]
+		]
 	`);
 
 	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm.emit(...signal))));
@@ -516,7 +516,7 @@ const vm_std = () => {
 	defn("uint", "iota", () => [uint_iota()]);
 	
 	vm.exec(`
-		[list for-each [list binary] start
+		[for-each [list binary] start
 			[defn _ [_ $0 at $1 $1 $1] eval [$0 slice [quote [$1]] [uint + $1 \\1] [quote [$2]]] $3]
 			[defn _ [_ $0 last-slice $1 $1 $1 $1] eval [$0 slice
 				[eval [uint - [$0 length $3] [quote [$2]]]]
