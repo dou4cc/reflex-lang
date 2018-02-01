@@ -9,10 +9,8 @@ const serialize = (...list) => {
 
 const deserialize = (begin, end, [...list]) => {
 	const pos = list.lastIndexOf(begin);
-	if(pos < 0){
-		if(list.includes(end)) throw SyntaxError("Invalid token");
-		return list;
-	}
+	if(list.includes(end) ^ pos >= 0) throw SyntaxError("Invalid token");
+	if(pos < 0) return list;
 	list.splice(pos, 0, list.splice(pos, list.indexOf(end, pos) - pos + 1).slice(1, -1));
 	return deserialize(begin, end, list);
 };
@@ -129,7 +127,9 @@ const is_buffer = a => {
 	try{
 		Reflect.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get.call(a);
 		return new Uint8Array(a).buffer;
-	}catch(error){}
+	}catch(error){
+		if(!(error instanceof TypeError)) throw error;
+	}
 };
 
 const buffer2bin = buffer => Array.from(new Uint8Array(buffer)).map(a => String.fromCodePoint(a)).join("");
@@ -340,13 +340,28 @@ const buffer_uuid = free => {
 	};
 };
 
+const so_error = (() => {
+	const f = () => f();
+	try{
+		f();
+	}catch(error){
+		return error;
+	}
+})();
+
+const catch_all = f => {
+	try{
+		return f();
+	}catch(error){
+		if(Reflect.getPrototypeOf(so_error) === Reflect.getPrototypeOf(error) && so_error.message === error.message) throw error;
+	}
+};
+
 const vm_defn = vm => (...path) => {
 	const f = path.pop();
 	return vm.on(...path, (...effect) => {
 		let results;
-		try{
-			results = [...f(effect)];
-		}catch(error){}
+		catch_all(() => results = [...f(effect)]);
 		if(results) vm.emit("quote", results, ...effect);
 	});
 };
@@ -530,9 +545,8 @@ const vm_std = () => {
 			[defn _ [_ $0 last-slice $1 $1 $1 $1] eval [$0 slice
 				[eval [uint - [$0 length $3] [quote [$2]]]]
 				[eval [uint - [$0 length $3] [quote [$1]]]]
-				[quote [$3]]]
-				$4
-			]
+				[quote [$3]]
+			] $4]
 			[defn _ [_ $0 cut $1 $1 $1] eval [$0 slice [quote [$1]] [$0 length $2] [quote [$2]]] $3]
 			[defn _ [_ $0 last-cut $1 $1 $1] eval [$0 last-slice [quote [$1]] [$0 length $2] [quote [$2]]] $3]
 		]
@@ -573,15 +587,14 @@ const signals2code = (options = {}) => (...signals) => {
 		if(a === end) return "\t ]";
 		const buffer = is_buffer(a);
 		if(buffer){
-			if(options.utf8_to_str) try{
-				a = utf8_to_str(buffer);
-			}catch(error){}
+			if(options.utf8_to_str) catch_all(() => a = utf8_to_str(buffer));
 			if(!is_str(a)) return "%" + buffer2hex(buffer);
 		}
 		if(!is_str(a)) throw TypeError("Unsupported");
-		if(is_param(a)) try{
-			if(str2num(a.length.toString()) === a.length) return "$" + a.length;
-		}catch(error){}
+		if(is_param(a)){
+			const literal = catch_all(() => str2num(a.length.toString()) === a.length && "$" + a.length);
+			if(literal) return literal;
+		}
 		return /^\\|^%|^\$\d|[[;`\s\0-\u{1f}\u{7f}\]]/u.test(a) ? "`" + a
 		.replace(/\\(?:[0-9A-Fa-f]+;|[nrt])|`/gu, "\\$&")
 		.replace(/[\n\r\t]/gu, $ => ({"\n": "\\n", "\r": "\\r", "\t": "\\t"})[$])
@@ -605,9 +618,7 @@ const guid2buffer = guid => hex2buffer(guid.replace(/-/gu, ""));
 const vm_common = log => {
 	const vm = vm_std();
 	if(log) vm.on("log", (...message) => {
-		try{
-			message = signals2code({utf8_to_str: true})(...message);
-		}catch(error){}
+		catch_all(() => message = signals2code({utf8_to_str: true})(...message));
 		if(is_str(message)) log(message);
 	});
 	return vm;
