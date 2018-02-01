@@ -341,7 +341,7 @@ const buffer_uuid = free => {
 };
 
 const so_error = (() => {
-	const f = () => f();
+	const f = a => !f(!a);
 	try{
 		f();
 	}catch(error){
