@@ -349,11 +349,23 @@ const so_error = (() => {
 	}
 })();
 
+const is_internal_error =
+	typeof InternalError === "undefined"
+	? (() => {
+		const f = () => !f();
+		try{
+			f();
+		}catch(error){
+			return error1 => Object.is(...[error, error1].map(Reflect.getPrototypeOf)) && error.message === error1.message;
+		}
+	})()
+	: error => error instanceof InternalError;
+
 const catch_all = f => {
 	try{
-		return f();
+		f();
 	}catch(error){
-		if(Reflect.getPrototypeOf(so_error) === Reflect.getPrototypeOf(error) && so_error.message === error.message) throw error;
+		if(is_internal_error(error)) throw error;
 	}
 };
 
@@ -592,7 +604,8 @@ const signals2code = (options = {}) => (...signals) => {
 		}
 		if(!is_str(a)) throw TypeError("Unsupported");
 		if(is_param(a)){
-			const literal = catch_all(() => str2num(a.length.toString()) === a.length && "$" + a.length);
+			let literal;
+			catch_all(() => literal = str2num(a.length.toString()) === a.length && "$" + a.length);
 			if(literal) return literal;
 		}
 		return /^\\|^%|^\$\d|[[;`\s\0-\u{1f}\u{7f}\]]/u.test(a) ? "`" + a
@@ -628,7 +641,7 @@ const vm_common = log => {
 
 /*test*
 var vm = vm_common(message => console.log("log: " + message));
-vm.exec(`
+if(1) vm.exec(`
 	[defn _ [_ echo $0 $0] start
 		[log $0]
 		[quote [$0] $1]
