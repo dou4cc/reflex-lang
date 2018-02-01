@@ -417,10 +417,6 @@ const vm_std = () => {
 			]
 		]
 		
-		[defn _ [_ list ? $0 $0] call [$1] [match? $0 [$2]] match [$2] [[$3] $3]
-			[quote [$4] $3]
-		]
-		
 		[defn _ [_ cond $0 $0 $0 $0]
 			match $0 T [quote [$1] $3]
 			match $0 F [quote [$2] $3]
@@ -460,6 +456,10 @@ const vm_std = () => {
 		
 		[defn _ [_ eval $0 $0] _ eval [] $0 $1]
 		
+		[defn _ [_ eval* $0 $0] call [$1] [eval $0] match [$2] [[$3] $3]
+			[quote [[$4]] $3]
+		]
+		
 		[defn _ [_ head [$0 $0] $0] quote [$0] $2]
 		
 		[defn _ [_ tail [$0 $0] $0] quote [$1] $2]
@@ -474,12 +474,21 @@ const vm_std = () => {
 				[$2 _ [_ $5 $7] $6 $7]
 			]
 		]
+		
+		[defn _ [_ list ? $0 $0] call [$1] [match? $0 [$2]] match [$2] [[$3] $3]
+			[quote [$4] $3]
+		]
+		
+		[defn _ [_ list concat [$0] [$0] $0] quote [$0 $1] $2]
+		
+		[defn _ [_ list map [$0] [] $0] quote [] $1]
+		
+		[defn _ [_ list map [$0] [$0 $0] $0] eval [list concat [eval* [[quote [$0 $1]]]] [eval* [[quote [list map [$0] [$2]]]]]] $3]
 	`);
-
+	
 	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm.emit(...signal))));
 	
 	defop(1, "list", "length", list => Array.isArray(list) && [num2uint(list.length)]);
-	defop(2, "list", "concat", (a, b) => [a, b].every(Array.isArray) && a.concat(b));
 	defop(3, "list", "slice", (begin, end, list) => {
 		if(!Array.isArray(list)) return;
 		[begin, end] = [begin, end].map(uint2num);
@@ -608,5 +617,11 @@ const vm_common = log => {
 
 /*test*
 var vm = vm_common(message => console.log("log: " + message));
-//vm.on((...signal) => console.log("signal: " + signals2code({utf8_to_str: true})(...signal)));
+vm.exec(`
+	[defn _ [_ echo $0 $0] start
+		[log $0]
+		[quote [$0] $1]
+	]
+`);
+if(0) vm.on((...signal) => console.log("signal: " + signals2code({utf8_to_str: true})(...signal)));
 //*/
