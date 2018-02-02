@@ -340,15 +340,6 @@ const buffer_uuid = free => {
 	};
 };
 
-const so_error = (() => {
-	const f = a => !f(!a);
-	try{
-		f();
-	}catch(error){
-		return error;
-	}
-})();
-
 const is_internal_error =
 	typeof InternalError === "undefined"
 	? (() => {
