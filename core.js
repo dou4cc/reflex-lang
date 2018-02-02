@@ -69,6 +69,7 @@ const run = f => {
 	try{
 		f();
 	}catch(error){
+		if(is_internal_error(error)) debugger;
 		setTimeout(() => {
 			throw error;
 		});
@@ -340,23 +341,24 @@ const buffer_uuid = free => {
 	};
 };
 
-const is_internal_error =
-	typeof InternalError === "undefined"
-	? (() => {
-		const f = () => !f();
-		try{
-			f();
-		}catch(error){
-			return error1 => Object.is(...[error, error1].map(Reflect.getPrototypeOf)) && error.message === error1.message;
-		}
-	})()
-	: error => error instanceof InternalError;
+const throw_internal_error = (() => {
+	let so;
+	if(typeof InternalError === "undefined") try{
+		so = () => !so();
+		so();
+	}catch(error){
+		so = error;
+	}
+	return error => {
+		if(so ? Object.is(...[error, so].map(Reflect.getPrototypeOf)) && error.message === so.message : error instanceof InternalError) throw error;
+	};
+})();
 
 const catch_all = f => {
 	try{
 		f();
 	}catch(error){
-		if(is_internal_error(error)) throw error;
+		throw_internal_error(error);
 	}
 };
 
