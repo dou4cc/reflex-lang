@@ -69,7 +69,6 @@ const run = f => {
 	try{
 		f();
 	}catch(error){
-		if(is_internal_error(error)) debugger;
 		setTimeout(() => {
 			throw error;
 		});
