@@ -421,6 +421,10 @@ const vm_std = () => {
 			[quote [match [$2 $5] [$6] [$4]] $3 $5]
 		]
 		
+		[defn _ [_ call* $0 $0] call [$1] $0 match [$2] [[$3] $3]
+			[quote [[$4]] $3]
+		]
+		
 		[defn _ [_ match? $0] call [$0] [escape [$0]] match [$1] [[$2] [$2 $2 $2]]
 			[call [$3 $2] [escape [$5]] match [$6] [[$7 $7 $7 $7] [$7]]
 				[match [[[_ match? $7 $9] start [unreflex $12] [quote [T] $11] ] $8 $9 $10] [[$12] $12 $12 $12]
@@ -475,8 +479,10 @@ const vm_std = () => {
 		
 		[defn _ [_ eval $0 $0] _ eval [] $0 $1]
 		
-		[defn _ [_ eval* $0 $0] call [$1] [eval $0] match [$2] [[$3] $3]
-			[quote [[$4]] $3]
+		[defn _ [_ lambda $0 $0 $0] call [$0 $2] [escape $1] match [$3] [[$4 $4 $4] [$4]]
+			[match [[$6] $5] [[$8] $4]
+				[$7 $8]
+			]
 		]
 		
 		[defn _ [_ head [$0 $0] $0] quote [$0] $2]
@@ -502,7 +508,7 @@ const vm_std = () => {
 		
 		[defn _ [_ list map [$0] [] $0] quote [] $1]
 		
-		[defn _ [_ list map [$0] [$0 $0] $0] eval [list concat [eval* [[quote [$0 $1]]]] [eval* [[quote [list map [$0] [$2]]]]]] $3]
+		[defn _ [_ list map [$0] [$0 $0] $0] eval [list concat [call* [$0 $1]] [call* [list map [$0] [$2]]]] $3]
 	`);
 	
 	vm.on("defer", (...signal) => Promise.resolve().then(() => run(() => vm.emit(...signal))));
