@@ -1,25 +1,10 @@
 "use strict";
 
-const list_concat = lists => lists.reduce((a, b) => [].concat(a, b));
-
-const serialize = (begin, end, list) => list_concat(list.map(a => Array.isArray(a) ? [begin, ...a, end] : [a]));
-
-const serialize_through = (begin, end, list) => {
-	let result;
-	do{
-		result = list;
-		list = serialize(begin, end, list);
-	}while(result.length !== list.length);
-	return result;
-};
-
-const deserialize = (begin, end, list) => {
-	const result = [];
-	let n = 0;
-	for(let i = list.length - 1; i >= 0; i -= 1){
-		
-	}
-	return result;
+const serialize = (...list) => {
+	const begin = Symbol();
+	const end = Symbol();
+	const f = list => [].concat(...list.map(a => Array.isArray(a) ? [begin, ...f(a), end] : a));
+	return [begin, end, f(list)];
 };
 
 const deserialize = (begin, end, [...list]) => {
