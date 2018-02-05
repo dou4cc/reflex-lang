@@ -1,17 +1,45 @@
 "use strict";
 
-const list_concat = lists => lists.reduce((a, b) => [].concat(a, b));
+const throw_internal_error = (() => {
+	let so;
+	if(typeof InternalError === "undefined") try{
+		so = () => !so();
+		so();
+	}catch(error){
+		so = error;
+	}
+	return error => {
+		if(so ? Object.is(...[error, so].map(Reflect.getPrototypeOf)) && error.message === so.message : error instanceof InternalError) throw error;
+	};
+})();
 
-const serialize = (begin, end, list) => list_concat(list.map(a => Array.isArray(a) ? [begin, ...a, end] : [a]));
-
-const serialize_through = (begin, end, list) => {
-	let result;
-	do{
-		result = list;
-		list = serialize(begin, end, list);
-	}while(result.length !== list.length);
-	return result;
+const catch_all = f => {
+	try{
+		return f();
+	}catch(error){
+		throw_internal_error(error);
+	}
 };
+
+const iter = class extends (function*(){}).constructor{
+	[Symbol.iterator](){
+		return this();
+	}
+};
+
+const is_gen = a => catch_all(() => [[] = a]) && (function*(){
+	return yield* a;
+})();
+
+const concat = function*(gens){
+	for(let gen of gens) yield* gen;
+};
+
+const map = function*(f, gen){
+	for(let a of gen) yield f(a);
+};
+
+const serialize = (begin, end, list) => concat(map(a => is_gen(a) ? concat([[begin], serialize(begin, end, a), [end]]) : [a], list));
 
 const deserialize = (begin, end, list) => {
 	const result = [];
@@ -353,27 +381,6 @@ const buffer_uuid = free => {
 			check();
 		},
 	};
-};
-
-const throw_internal_error = (() => {
-	let so;
-	if(typeof InternalError === "undefined") try{
-		so = () => !so();
-		so();
-	}catch(error){
-		so = error;
-	}
-	return error => {
-		if(so ? Object.is(...[error, so].map(Reflect.getPrototypeOf)) && error.message === so.message : error instanceof InternalError) throw error;
-	};
-})();
-
-const catch_all = f => {
-	try{
-		f();
-	}catch(error){
-		throw_internal_error(error);
-	}
 };
 
 const vm_defn = vm => (...path) => {
