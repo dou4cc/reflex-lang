@@ -13,19 +13,32 @@ const throw_internal_error = (() => {
 	};
 })();
 
-const catch_all = f => {
+const catch_all = async f => {
 	try{
-		return f();
+		return await f();
 	}catch(error){
 		throw_internal_error(error);
 	}
 };
 
-const iter = class extends (function*(){}).constructor{
-	[Symbol.iterator](){
-		return this();
-	}
-};
+const [is_list, iter2list] = (() => {
+	const lists = new WeakSet;
+	return [
+		a => lists.has(a),
+		iter => {
+			const cache = [];
+			const list = Object.freeze({*[Symbol.iterator](){
+				yield* cache;
+				for(let a of iter){
+					cache.push(a);
+					yield a;
+				}
+			}});
+			lists.add(list);
+			return list;
+		},
+	];
+})();
 
 const is_gen = a => catch_all(() => [[] = a]) && (function*(){
 	return yield* a;
