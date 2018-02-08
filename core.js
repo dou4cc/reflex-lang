@@ -13,12 +13,87 @@ const throw_internal_error = (() => {
 	};
 })();
 
-const catch_all = async f => {
+const catch_all = async fn => {
 	try{
-		return await f();
+		return await fn();
 	}catch(error){
 		throw_internal_error(error);
 	}
+};
+
+const new_queue = () => {
+	const queue = [];
+	let resolve;
+	return Object.assign((async function*(){
+		let a;
+		while(true){
+			const promise = new Promise(resolve1 => resolve = resolve1);
+			while(a = queue.shift()){
+				if(!a.length) return;
+				yield a[0];
+			}
+			await promise;
+		}
+	})(), {
+		push: a => queue.push([a]) === 1 && resolve(),
+		close: () => {
+			queue.push([]);
+		},
+	});
+};
+
+const run = fn => {
+	(async () => {
+		try{
+			await fn();
+		}catch(error){
+			setTimeout(() => {
+				throw error;
+			});
+		}
+	})();
+};
+
+const new_lock = () => {
+	const unlock = () => queue.next().then(({value}) => {
+		let counter = 0;
+		value(() => {
+			if(!counter++) unlock();
+		});
+	});
+	const queue = new_queue();
+	unlock();
+	return new Promise(queue.push);
+};
+
+const same_array = (a, b) => a && a.length === b.length && a.every((a, i) => [a].includes(b[i]));
+
+const cache = f => {
+	let args0;
+	let result0;
+	const results = new WeakMap;
+	const lock = new_lock();
+	return async (...args) => {
+		const unlock = await lock();
+		const same = same_array(args0, args);
+		const result = result0;
+		unlock();
+		if(same) return result;
+		if(args1.length === 1){
+			let result1 = results.get(args1[0]);
+			if(result1) return result1[0];
+			result1 = f(args1[0]);
+			try{
+				results.set(args1[0], [result1]);
+				return result1;
+			}catch(error){}
+			result = result1;
+		}else{
+			result = f(...args1);
+		}
+		args = args1;
+		return result;
+	};
 };
 
 const [is_list, iter2list] = (() => {
@@ -27,7 +102,7 @@ const [is_list, iter2list] = (() => {
 		a => lists.has(a),
 		iter => {
 			const cache = [];
-			const list = Object.freeze({*[Symbol.iterator](){
+			const list = Object.freeze({async *[Symbol.iterator](){
 				yield* cache;
 				for(let a of iter){
 					cache.push(a);
@@ -120,16 +195,6 @@ const ast2signals = ast => {
 };
 
 const code2signals = code => ast2signals(code2ast(code));
-
-const run = f => {
-	try{
-		f();
-	}catch(error){
-		setTimeout(() => {
-			throw error;
-		});
-	}
-};
 
 const reflexion = free => {
 	const check = () => children.size || reflexes.size || free && run(free);
