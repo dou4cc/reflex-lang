@@ -68,31 +68,45 @@ const new_lock = () => {
 
 const same_array = (a, b) => a && a.length === b.length && a.every((a, i) => [a].includes(b[i]));
 
-const cache = f => {
+const fn_cache = fn => {
 	let args0;
 	let result0;
 	const results = new WeakMap;
-	const lock = new_lock();
+	const results_lock = new_lock();
 	return async (...args) => {
 		const unlock = await lock();
 		const same = same_array(args0, args);
 		const result = result0;
 		unlock();
 		if(same) return result;
-		if(args1.length === 1){
-			let result1 = results.get(args1[0]);
-			if(result1) return result1[0];
-			result1 = f(args1[0]);
-			try{
-				results.set(args1[0], [result1]);
-				return result1;
-			}catch(error){}
-			result = result1;
+		if(args.length === 1){
+			let result = results.get(...args);
+			if(result) return result[0];
+			result = await fn(...args);
+			if(await catch_all(() => results.set(...args, [result]))) return result;
+			result0 = result;
 		}else{
-			result = f(...args1);
+			result0 = await fn(...args);
 		}
-		args = args1;
-		return result;
+		args0 = args;
+		return result0;
+	};
+	return async (...args) => {
+		if(args.length === 1 && await catch_all(() => new WeakSet(args))){
+			let result0 = results.get(...args);
+			if(result0) return result0[0];
+			const result = await fn(...args);
+			const unlock = await results_lock();
+			result0 = results.get(...args);
+			if(result0){
+				[result0] = result0;
+			}else{
+				results.set(...args, [result]);
+				result0 = result;
+			}
+			unlock();
+			return result0;
+		}
 	};
 };
 
