@@ -15,99 +15,99 @@ const throw_internal_error = (() => {
 
 const catch_all = async fn => {
 	try{
-		return await fn();
+		return fn();
 	}catch(error){
 		throw_internal_error(error);
 	}
 };
 
-const new_queue = () => {
-	const queue = [];
+const queue = () => {
 	let resolve;
+	const list = [];
 	return Object.assign((async function*(){
 		let a;
 		while(true){
 			const promise = new Promise(resolve1 => resolve = resolve1);
-			while(a = queue.shift()){
+			while(a = list.shift()){
 				if(!a.length) return;
 				yield a[0];
 			}
 			await promise;
 		}
 	})(), {
-		push: a => queue.push([a]) === 1 && resolve(),
+		append: a => {
+			if(list.push([a]) === 1) resolve();
+		},
 		close: () => {
-			queue.push([]);
+			list.push([]);
 		},
 	});
 };
 
-const run = fn => {
-	(async () => {
-		try{
-			await fn();
-		}catch(error){
-			setTimeout(() => {
-				throw error;
-			});
-		}
-	})();
+const list_first = async list => {
+	for await(let a of list) return a;
+	throw RangeError("Out of list");
 };
 
-const new_lock = () => {
-	const unlock = () => queue.next().then(({value}) => {
-		let counter = 0;
-		value(() => {
-			if(!counter++) unlock();
+const run = async fn => {
+	try{
+		await fn();
+	}catch(error){
+		setTimeout(() => {
+			throw error;
 		});
-	});
-	const queue = new_queue();
-	unlock();
-	return new Promise(queue.push);
+	}
 };
 
-const same_array = (a, b) => a && a.length === b.length && a.every((a, i) => [a].includes(b[i]));
+const promise_try = async fn => fn();
+
+const thread = () => {
+	const queue0 = queue();
+	run(async () => {
+		for await(let a of queue0) await a();
+	});
+	return {
+		append: task => new Promise((...callbacks) => queue0.append(promise_try(task).then(...callbacks))),
+		close: queue0.close,
+	};
+};
+
+const equal = (a, b) => [a].includes(b);
+
+const same_array = (a, b) => a.length === b.length && a.every((a, i) => equal(a, b[i]));
 
 const fn_cache = fn => {
+	const thread0 = thread();
+	const thread1 = thread();
+	const results = new WeakMap;
 	let args0;
 	let result0;
-	const results = new WeakMap;
-	const results_lock = new_lock();
 	return async (...args) => {
-		const unlock = await lock();
-		const same = same_array(args0, args);
-		const result = result0;
-		unlock();
-		if(same) return result;
-		if(args.length === 1){
-			let result = results.get(...args);
-			if(result) return result[0];
-			result = await fn(...args);
-			if(await catch_all(() => results.set(...args, [result]))) return result;
-			result0 = result;
-		}else{
-			result0 = await fn(...args);
-		}
-		args0 = args;
-		return result0;
+		const thunk = () => promise_try(() => fn(...args));
+		if(args.length === 1 && await catch_all(() => new WeakSet(args))) return thread0.append(() => {
+			if(results.has(...args)) return results.get(...args);
+			const result = thunk();
+			results.set(...args, result);
+			return result;
+		});
+		return thread1.append(() => {
+			if(args0 && same_array(args0, args)) return result0;
+			args0 = args;
+			return result0 = thunk();
+		});
 	};
-	return async (...args) => {
-		if(args.length === 1 && await catch_all(() => new WeakSet(args))){
-			let result0 = results.get(...args);
-			if(result0) return result0[0];
-			const result = await fn(...args);
-			const unlock = await results_lock();
-			result0 = results.get(...args);
-			if(result0){
-				[result0] = result0;
-			}else{
-				results.set(...args, [result]);
-				result0 = result;
-			}
-			unlock();
-			return result0;
-		}
-	};
+};
+
+const lock = () => {
+	const unlock = () => queue0.next().then(({value}) => {
+		const unlock1 = fn_cache(unlock);
+		value(() => {
+			unlock1();
+		});
+	});
+	const queue0 = queue();
+	unlock();
+	return () => new Promise(queue0.append);
 };
 
 const [is_list, iter2list] = (() => {
