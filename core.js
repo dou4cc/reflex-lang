@@ -21,6 +21,17 @@ const catch_all = async fn => {
 	}
 };
 
+const list_first = async list => {
+	for await(let a of list) return a;
+	throw RangeError("Out of list");
+};
+
+const list_count = async list => {
+	let counter = 0;
+	for await(let a of list) counter += 1;
+	return counter;
+};
+
 const queue = () => {
 	let resolve;
 	const list = [];
@@ -29,8 +40,8 @@ const queue = () => {
 		while(true){
 			const promise = new Promise(resolve1 => resolve = resolve1);
 			while(a = list.shift()){
-				if(!a.length) return;
-				yield a[0];
+				if(!list_count(a)) return;
+				yield list_first(a);
 			}
 			await promise;
 		}
@@ -42,11 +53,6 @@ const queue = () => {
 			list.push([]);
 		},
 	});
-};
-
-const list_first = async list => {
-	for await(let a of list) return a;
-	throw RangeError("Out of list");
 };
 
 const run = async fn => {
@@ -67,7 +73,7 @@ const thread = () => {
 		for await(let a of queue0) await a();
 	});
 	return {
-		append: task => new Promise((...callbacks) => queue0.append(promise_try(task).then(...callbacks))),
+		append: task => new Promise((...callbacks) => queue0.append(() => promise_try(task).then(...callbacks))),
 		close: queue0.close,
 	};
 };
@@ -110,28 +116,32 @@ const lock = () => {
 	return () => new Promise(queue0.append);
 };
 
-const [is_list, iter2list] = (() => {
-	const lists = new WeakSet;
-	return [
-		a => lists.has(a),
-		iter => {
-			const cache = [];
-			const list = Object.freeze({async *[Symbol.iterator](){
-				yield* cache;
-				for(let a of iter){
-					cache.push(a);
-					yield a;
-				}
-			}});
-			lists.add(list);
-			return list;
-		},
-	];
+const list2iter = list => async function*(){
+	for await(let a of list) yield a;
+};
+
+const iter2list = iter => ({[Symbol.iterator]: iter});
+
+const list_cache = (() => {
+	const caches = new WeakSet;
+	return list => {
+		const next = async () => {
+			cache.push(fn_cache(next));
+			for await(let a of list) return [a];
+			return [];
+		};
+		if(caches.has(list)) return list;
+		list = list2iter(list)();
+		const cache = [fn_cache(next)];
+		const result = iter2list(async function*(){
+			for(let a of cache) await list_count(a = await a()) && (yield list_first(a));
+		});
+		caches.add(result);
+		return result;
+	};
 })();
 
-const is_gen = a => catch_all(() => [[] = a]) && (function*(){
-	return yield* a;
-})();
+const is_list = async a => Boolean(await catch_all(() => [[] = a]));
 
 const concat = function*(gens){
 	for(let gen of gens) yield* gen;
