@@ -80,6 +80,11 @@ const thread = () => {
 
 const equal = (a, b) => [a].includes(b);
 
+const list_all = async (assert, list) => {
+	for await(let a of list) if(!await assert(a)) return false;
+	return true;
+};
+
 const same_array = (a, b) => a.length === b.length && a.every((a, i) => equal(a, b[i]));
 
 const fn_cache = fn => {
@@ -117,7 +122,7 @@ const lock = () => {
 };
 
 const list2iter = list => async function*(){
-	for await(let a of list) yield a;
+	yield* list;
 };
 
 const iter2list = iter => ({[Symbol.iterator]: iter});
