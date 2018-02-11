@@ -182,26 +182,17 @@ const list_unflatten = (begin, end, list) => list_cache((async function*(){
 			continue;
 		}
 		let counter = 1;
-		
+		const slice = [];
+		for await(let a of list){
+			if(a === begin) counter += 1;
+			if(a === end) counter -= 1;
+			if(!counter) break;
+			slice.push(a);
+		}
+		if(counter) throw SyntaxError("Unexpected token");
+		yield list_unflatten(begin, end, slice);
 	}
 })());
-
-const deserialize = (begin, end, list) => {
-	const result = [];
-	let n = 0;
-	for(let i = list.length - 1; i >= 0; i -= 1){
-		if(
-	}
-	return result;
-};
-
-const deserialize = (begin, end, [...list]) => {
-	const pos = list.lastIndexOf(begin);
-	if(list.includes(end) ^ pos >= 0) throw SyntaxError("Invalid token");
-	if(pos < 0) return list;
-	list.splice(pos, 0, list.splice(pos, list.indexOf(end, pos) - pos + 1).slice(1, -1));
-	return deserialize(begin, end, list);
-};
 
 const code2ast = code => {
 	code = code.replace(/\r\n?/gu, "\n").trim();
