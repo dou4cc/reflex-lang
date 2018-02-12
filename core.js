@@ -22,7 +22,7 @@ const throw_internal_error = (() => {
 	}catch(error){
 		so = error;
 	}
-	return fn_void(error => (so ? error_equal(so, error) : error instanceof InternalError) && thrower(error));
+	return error => void ((so ? error_equal(so, error) : error instanceof InternalError) && thrower(error));
 })();
 
 const catch_all = async fn => {
@@ -33,28 +33,35 @@ const catch_all = async fn => {
 	}
 };
 
-const list_concat = async function*(lists){
-	for await(let list of lists) yield* list;
+const list_uncache = async function*(list){
+	const uncache = async function*(list){
+		return yield* list;
+	};
+	list = uncache(list);
+	let a;
+	while(!({value: a} = await list.next()).done) yield a;
+	return a;
 };
 
-const list_next = list => list_concat([list]).next();
+const list_next = list => list_uncache(list).next();
 
 const for_each = async (list, fn) => {
-	for await(let a of list) await fn(a);
+	list = list_uncache(list);
+	let a;
+	while(!({value: a} = await list.next(a)).done) a = await fn(a);
+	return a;
 };
 
-const is_list = async a => Boolean(await catch_all(() => [[] = a]));
+const list_concat = async function*(lists){
+	for await(let list of list_uncache(lists)) yield* list_uncache(list);
+};
+
+const is_list = async a => Boolean(await catch_all(() => [[] = Symbol.asyncIterator in a ? {[Symbol.iterator]: a[Symbol.asyncIterator]} : a]));
 
 const list2array = async list => {
 	const array = [];
-	await for_each(list, async a => array.push(await is_list(a) ? await list2array(a) : a));
+	await for_each(list, async a => void array.push(await is_list(a) ? await list2array(a) : a));
 	return array;
-};
-
-const list_count = async list => {
-	let counter = 0;
-	await for_each(list, () => counter += 1);
-	return counter;
 };
 
 const promise = () => {
@@ -76,8 +83,8 @@ const queue = () => {
 			await promise0;
 		}
 	})(), {
-		append: fn_void(value => list.push({value}) === 1 && resolve()),
-		close: fn_void(() => list.push({done: true})),
+		append: value => void (list.push({value}) === 1 && resolve()),
+		close: () => void list.push({done: true}),
 	});
 };
 
@@ -99,24 +106,24 @@ const thread = () => {
 };
 
 const list_any = async (assert, list) => {
-	for await(let a of list) if(!await assert(a)) return false;
+	for await(let a of list_uncache(list)) if(!await assert(a)) return false;
 	return true;
 };
 
 const list_exist = async (assert, list) => {
-	for await(let a of list) if(await assert(a)) return true;
+	for await(let a of list_uncache(list)) if(await assert(a)) return true;
 	return false;
 };
 
 const list_equal = async (a, b) => {
-	b = list_concat([b]);
+	b = list_uncache(b);
 	return list_any(async a => {
 		const i = await list_next(b);
 		return !i.done && equal(a, i.value);
 	}, a);
 };
 
-const is_native = async a => Boolean(await catch_all(() => new WeakSet([a])));
+const is_object = async a => Boolean(await catch_all(() => new WeakSet([a])));
 
 const array = count => Array(count).fill();
 
@@ -126,7 +133,7 @@ const fn_cache = fn => {
 	let args0;
 	let result0;
 	return async (...args) =>
-		args.length === 1 && !await is_native(...args)
+		args.length === 1 && await is_object(...args)
 		? threads[0].append(() => {
 			if(results.has(...args)) return results.get(...args);
 			const result = fn(...args);
@@ -143,20 +150,16 @@ const fn_cache = fn => {
 const list_cache = (() => {
 	const results = new WeakSet;
 	return list => {
-		const next = () => {
-			cache.push(fn_cache(next));
-			return list_next(list);
+		const next = async () => {
+			const {value, done} = await list_next(list);
+			if(!done) return {value, next: fn_cache(next)};
 		};
 		if(results.has(list)) return list;
-		list = list_concat([[null], list]);
-		const cache = [];
-		next();
-		const result = {async *[Symbol.iterator](){
-			for(let i of cache){
-				i = await i();
-				if(i.done) return;
-				yield i.value;
-			}
+		list = list_uncache(list);
+		const start = fn_cache(next);
+		const result = {async *[Symbol.asyncIterator](){
+			let i = start;
+			while(i = await i()) yield ({next: i} = i).value;
 		}};
 		results.add(result);
 		return result;
@@ -164,17 +167,17 @@ const list_cache = (() => {
 })();
 
 const list_map = async function*(fn, list){
-	for await(let a of list) yield fn(a);
+	for await(let a of list_uncache(list)) yield fn(a);
 };
 
 const list_filter = async function*(assert, list){
-	for await(let a of list) await assert(a) && (yield a);
+	for await(let a of list_uncache(list)) await assert(a) && (yield a);
 };
 
 const list_flatten = (begin, end, list) => list_concat(list_map(async a => await is_list(a) ? list_concat([[begin], list_flatten(begin, end, a), [end]]) : [a], list));
 
 const list_unflatten = (begin, end, list) => list_cache((async function*(){
-	list = list_concat([list]);
+	list = list_uncache(list);
 	for await(let a of list){
 		if(a === end) throw SyntaxError("Unexpected token");
 		if(a !== begin){
@@ -183,7 +186,7 @@ const list_unflatten = (begin, end, list) => list_cache((async function*(){
 		}
 		let counter = 1;
 		const slice = [];
-		for await(let a of list){
+		for await(let a of list_uncache(list)){
 			if(a === begin) counter += 1;
 			if(a === end) counter -= 1;
 			if(!counter) break;
