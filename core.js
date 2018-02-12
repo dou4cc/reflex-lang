@@ -48,7 +48,7 @@ const list_next = list => list_uncache(list).next();
 const for_each = async (list, fn) => {
 	list = list_uncache(list);
 	let a;
-	while(!({value: a} = await list.next(a)).done) a = await fn(a);
+	while(!({value: a} = await list.next(a)).done) a = await (fn || (() => {}))(a);
 	return a;
 };
 
@@ -178,22 +178,17 @@ const list_flatten = (begin, end, list) => list_concat(list_map(async a => await
 
 const list_unflatten = (begin, end, list) => list_cache((async function*(){
 	list = list_uncache(list);
+	let promise;
 	for await(let a of list){
-		if(a === end) throw SyntaxError("Unexpected token");
+		await promise;
+		if(a === end) return;
 		if(a !== begin){
 			yield a;
 			continue;
 		}
-		let counter = 1;
-		const slice = [];
-		for await(let a of list_uncache(list)){
-			if(a === begin) counter += 1;
-			if(a === end) counter -= 1;
-			if(!counter) break;
-			slice.push(a);
-		}
-		if(counter) throw SyntaxError("Unexpected token");
-		yield list_unflatten(begin, end, slice);
+		const slice = list_unflatten(begin, end, list);
+		promise = for_each(slice);
+		yield slice;
 	}
 })());
 
