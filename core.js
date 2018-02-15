@@ -69,25 +69,6 @@ const promise = () => {
 	return [new Promise((...returns1) => returns = returns1), ...returns];
 };
 
-const queue = () => {
-	let resolve;
-	const list = [];
-	return Object.assign((async function*(){
-		let i;
-		while(true){
-			const [promise0] = [, resolve] = promise();
-			while(i = list.shift()){
-				if(i.done) return;
-				yield i.value;
-			}
-			await promise0;
-		}
-	})(), {
-		append: value => void (list.push({value}) === 1 && resolve()),
-		close: () => void list.push({done: true}),
-	});
-};
-
 const run = async fn => {
 	try{
 		await fn();
@@ -97,12 +78,12 @@ const run = async fn => {
 };
 
 const thread = () => {
-	const queue0 = queue();
-	run(async () => await for_each(queue0, call));
-	return {
-		append: task => new Promise((...returns) => queue0.append(() => call(task).then(...returns))),
-		close: queue0.close,
-	};
+	const thread = (async function*(){
+		let fn = yield;
+		while(true) fn = yield await fn();
+	})();
+	thread.next();
+	return task => new Promise((...returns) => run(() => thread.next(() => call(task).then(...returns))));
 };
 
 const list_any = async (assert, list) => {
@@ -134,13 +115,13 @@ const fn_cache = fn => {
 	let result0;
 	return async (...args) =>
 		args.length === 1 && await is_object(...args)
-		? threads[0].append(() => {
+		? threads[0](() => {
 			if(results.has(...args)) return results.get(...args);
 			const result = fn(...args);
 			results.set(...args, result);
 			return result;
 		})
-		: threads[1].append(async () => {
+		: threads[1](async () => {
 			if(args0 && await list_equal(args0, args)) return result0;
 			args0 = args;
 			return result0 = fn(...args);
