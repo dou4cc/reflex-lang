@@ -115,7 +115,7 @@ const fn_cache = fn => {
 	let result0;
 	return async (...args) =>
 		args.length === 1 && await is_object(...args)
-		? threads[0](() => {
+		? results.has(...args) ? results.get(...args) : threads[0](() => {
 			if(results.has(...args)) return results.get(...args);
 			const result = fn(...args);
 			results.set(...args, result);
