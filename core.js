@@ -8,28 +8,22 @@ const fn_void = fn => function(...args){
 	fn.call(this, ...args);
 };
 
-const throw_internal_error = (() => {
-	const is_internal_error =
-		typeof InternalError === "undefined"
-		? (() => {
-			const samples = [
-				() => {
-					const fn = () => !fn();
-					fn();
-				},
-			].map(fn => {
-				try{
-					fn();
-				}catch(error){
-					return error;
-				}
-				throw ReferenceError("Unexpected behavior");
-			});
-			return error => samples.some(sample => equal(...[error, sample].map(Reflect.getPrototypeOf)) && equal(error.message, sample.message));
-		})()
-		: error => InternalError.prototype.isPrototypeOf(error);
+const throw_disaster = (() => {
+	const samples = [
+		() => {
+			const fn = () => !fn();
+			fn();
+		},
+	].map(fn => {
+		try{
+			fn();
+		}catch(error){
+			return error;
+		}
+		throw ReferenceError("Unexpected behavior");
+	});
 	return error => {
-		if(is_internal_error(error)) throw error;
+		if(samples.some(sample => equal(...[error, sample].map(Reflect.getPrototypeOf)) && equal(error.message, sample.message))) throw error;
 	};
 })();
 
@@ -37,7 +31,7 @@ const catch_all = async fn => {
 	try{
 		return fn();
 	}catch(error){
-		throw_internal_error(error);
+		throw_disaster(error);
 	}
 };
 
