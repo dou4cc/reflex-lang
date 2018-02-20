@@ -172,7 +172,7 @@ const text_match = async (regex, text) => {
 		if(done) return;
 		string += value;
 	}
-	return [list_concat([string.slice(regex.lastIndex), text]), result];
+	return [list_concat([[string.slice(regex.lastIndex)], text]), ...result];
 };
 
 const code2ast = code => {
