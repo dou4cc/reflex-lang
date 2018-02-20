@@ -4,10 +4,6 @@ const equal = (a, b) => [a].includes(b);
 
 const call = async fn => fn();
 
-const fn_void = fn => function(){
-	fn.apply(this, arguments);
-};
-
 const throw_call_stack_error = (() => {
 	const samples = [
 		() => {
@@ -43,16 +39,12 @@ const list_uncache = async function*(list){
 	list = (async function*(list){
 		return yield* list;
 	})(list);
-	let a;
-	while(!({value: a} = await list.next()).done) yield await is_list(a) ? list_uncache(a) : a;
-	return a;
+	let value;
+	while(!({value} = await list.next()).done) yield await is_list(value) ? list_uncache(value) : value;
 };
 
 const for_each = async (list, fn) => {
-	list = list_uncache(list);
-	let a;
-	while(!({value: a} = await list.next(a)).done) a = await (fn || (() => {}))(a);
-	return a;
+	for await(let a of list_uncache(list)) await (fn || (() => {}))(a);
 };
 
 const list_concat = async function*(lists){
@@ -61,9 +53,7 @@ const list_concat = async function*(lists){
 
 const list_to_array = async list => {
 	const array = [];
-	await for_each(list, async a => {
-		array.push(await is_list(a) ? await list_to_array(a) : a);
-	});
+	await for_each(list, async a => array.push(await is_list(a) ? await list_to_array(a) : a));
 	return array;
 };
 
@@ -130,16 +120,16 @@ const fn_cache = fn => {
 const list_cache = (() => {
 	const results = new WeakSet;
 	return list => {
-		const next = async () => {
+		const next = () => fn_cache(async () => {
 			const {value, done} = await list.next();
-			if(!done) return {value: await is_list(value) ? list_cache(value) : value, next: fn_cache(next)};
-		};
+			if(!done) return [next(), await is_list(value) ? list_cache(value) : value];
+		});
 		if(results.has(list)) return list;
 		list = list_uncache(list);
-		const entry = fn_cache(next);
+		const entry = next();
 		const result = {async *[Symbol.asyncIterator](){
-			let i = {next: entry};
-			while(i = await i.next()) yield i.value;
+			let i = entry;
+			while(i = await i()) yield ([i] = i)[1];
 		}};
 		results.add(result);
 		return result;
@@ -170,6 +160,19 @@ const list_unflatten = async function*(begin, end, list){
 		await for_each(slice);
 	}
 	throw SyntaxError("Invalid token");
+};
+
+const text_match = async (regex, text) => {
+	text = list_uncache(text);
+	regex = RegExp(regex);
+	let string = "";
+	let result;
+	while(!(result = regex.exec(string))){
+		const {value, done} = await text.next();
+		if(done) return;
+		string += value;
+	}
+	return [list_concat([string.slice(regex.lastIndex), text]), result];
 };
 
 const code2ast = code => {
