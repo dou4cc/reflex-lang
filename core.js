@@ -164,7 +164,7 @@ const list_unflatten = async function*(begin, end, list){
 
 const text_match = async (regex, text) => {
 	text = list_uncache(text);
-	regex = RegExp(regex);
+	regex = new RegExp(regex);
 	let string = "";
 	let result;
 	while(!(result = regex.exec(string))){
@@ -173,6 +173,11 @@ const text_match = async (regex, text) => {
 		string += value;
 	}
 	return [list_concat([[string.slice(regex.lastIndex)], text]), ...result];
+};
+
+const text_match_all = async function*(regex, text){
+	let i;
+	while(i = await text_match(regex, text)) yield ([text] = i).slice(1);
 };
 
 const code2ast = code => {
