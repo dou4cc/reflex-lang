@@ -180,6 +180,11 @@ const text_match_all = async function*(regex, text){
 	while(i = await text_match(regex, text)) yield ([text] = i).slice(1);
 };
 
+const code_to_list = code => list_map(async $ => {
+	$ = await list_to_array($);
+	return $[1] + ($[2] ? "\n" : "");
+}, text_match_all(/([^]*?)(\r(?:\n|(?=[^])))/gu, list_concat([code, "\n"])));
+
 const code2ast = code => {
 	code = code.replace(/\r\n?/gu, "\n").trim();
 	const tokens = code.match(/`(?:\\`|[^`])*`|[[\]]|(?:(?![[;`\]])\S)+|;.*/gu) || [];
