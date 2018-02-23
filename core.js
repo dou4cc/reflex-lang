@@ -67,6 +67,8 @@ const run = async fn => {
 	}
 };
 
+const fn_bind = (fn, ...args0) => (...args1) => fn(...args0, ...args1);
+
 const thread = () => {
 	const thread = (async function*(){
 		let fn = yield;
@@ -180,10 +182,28 @@ const text_match_all = async function*(regex, text){
 	while(i = await text_match(regex, text)) yield ([text] = i).slice(1);
 };
 
-const code_to_list = code => list_map(async $ => {
-	$ = await list_to_array($);
-	return $[1] + ($[2] ? "\n" : "");
-}, text_match_all(/([^]*?)(\r(?:\n|(?=[^])))/gu, list_concat([code, "\n"])));
+const text_normalize = async function*(text){
+	let string0;
+	for await(let string of await Promise
+		.resolve(list_concat([text, ["\0"]]))
+		.then(fn_bind(text_match_all, /(.*?)(\r(?=.)\n?|$)/gmu))
+		.then(fn_bind(list_map, async $ => {
+			$ = await list_to_array($);
+			return $[1] + ($[2] ? "\n" : "");
+		}))
+	){
+		if(string0) yield string0;
+		string0 = /\0$/u.test(string) && string;
+		if(!string0) yield string;
+	}
+	yield string0.slice(0, -1);
+};
+
+const text_to_string = async text => (await list_to_array(text)).join("");
+
+const code_to_list = async function*(code){
+	code = text_normalize(code);
+};
 
 const code2ast = code => {
 	code = code.replace(/\r\n?/gu, "\n").trim();
