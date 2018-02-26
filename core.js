@@ -185,7 +185,7 @@ const text_match_all = async function*(regex, text){
 const text_normalize = async function*(text){
 	let string0;
 	for await(let string of await Promise.resolve(list_concat([text, ["\0"]]))
-		.then(fn_bind(text_match_all, /(?=.)([^\r]*)(\r(?=.)\n?)?/gmu))
+		.then(fn_bind(text_match_all, /(?=[^])([^\r]*)(\r(?=[^])\n?)?/gu))
 		.then(fn_bind(list_map, $ => Promise.resolve($).then(list_to_array).then($ => $[1] + ($[2] ? "\n" : ""))))
 	){
 		if(string0) yield string0;
