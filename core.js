@@ -192,7 +192,8 @@ const text_normalize = async function*(text){
 		string0 = /\0$/u.test(string) && string;
 		if(!string0) yield string;
 	}
-	yield string0.slice(0, -1);
+	yield string0 = string0.slice(0, -1);
+	if(!/\n$/u.test(string0)) yield "\n";
 };
 
 const text_to_string = async text => (await list_to_array(text)).join("");
