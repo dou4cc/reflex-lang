@@ -198,28 +198,23 @@ const text_normalize = async function*(text){
 
 const text_to_string = async text => (await list_to_array(text)).join("");
 
-const code_to_list = async function*(code){
-	code = text_normalize(code);
+const string_to_utf8 = async string => new Uint8Array(await list_to_array(list_concat(Array.from(string).map(a => {
+	const f = (a, i) => i ? f(a >> 6, i - 1).concat(0x80 | a & 0x3f) : [];
+	a = a.codePointAt();
+	if(a < 0x80) return [a];
+	const array = f(a, a = Math.floor(Math.log2(a) / 6) + 1);
+	array[0] |= ~(1 << 8 - a) + 1;
+	return array;
+})))).buffer;
+
+const string_to_number = (a, radix = 10) => {
+	if(a.toLowerCase() !== (a = Number.parseInt(a, radix)).toString(radix) || Number.isNaN(a)) throw SyntaxError("Invalid token");
+	return a;
 };
 
-const code2ast = code => {
-	code = code.replace(/\r\n?/gu, "\n").trim();
-	const tokens = code.match(/`(?:\\`|[^`])*`|[[\]]|(?:(?![[;`\]])\S)+|;.*/gu) || [];
-	return deserialize("[", "]", tokens.filter(token => !/^;/u.test(token)).map(token => {
-		if(/^[[\]]$/u.test(token)) return token;
-		if(/`/u.test(token)) return {flag: "`", value:
-			token.slice(1, -1)
-			.replace(/(^|[^\\])\\[nrt]/gu, ($, $1) => $1 + {n: "\n", r: "\r", t: "\t"}[$1])
-			.replace(/(^|[^\\])\\([0-9a-f]+);/giu, ($, $1, $2) => $1 + String.fromCodePoint(Number.parseInt($2, 16)))
-			.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt])|\\*`)/gu, "$1")
-		};
-		return {flag: "", value: token};
-	}));
-};
+const hex_to_buffer = hex => new Uint8Array(Array(hex.length / 2)).map((a, i) => string_to_number(hex.substr(i * 2, 2).replace(/^(?:0(?!$))*/u, ""), 16)).buffer;
 
-const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
-
-const num2uint = number => {
+const number_to_uint = number => {
 	if(!Number.isSafeInteger(number) || number < 0) throw TypeError("Only safe natural number can be converted to uint.");
 	const array = [];
 	while(number >= 1){
@@ -229,28 +224,27 @@ const num2uint = number => {
 	return new Uint8Array(array).buffer;
 };
 
-const str2num = (a, radix = 10) => {
-	if(a.toLowerCase() !== (a = Number.parseInt(a, radix)).toString(radix) || Number.isNaN(a)) throw SyntaxError("Invalid token");
-	return a;
-};
+const code_to_list = code => list_unflatten("[", "]", list_concat([["["], (async function*(){
+	code = list_cache(code);
+	let i;
+	while(i = await text_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|(?:(?![[#`\]])\S)+(?=\s)/gu, code)){
+		const [, token] = [code] = i;
+		code = list_cache(code);
+		if(/^#/u.test(token)) continue;
+		yield /^[[\]]$/u.test(token) ? token
+		: /^`/u.test(token) ? string_to_utf8(token.slice(1, -1)
+		.replace(/(^|[^\\])\\[nrt]/gu, ($, $1) => $1 + {n: "\n", r: "\r", t: "\t"}[$1])
+		.replace(/(^|[^\\])\\([0-9a-f]+);/giu, ($, $1, $2) => $1 + String.fromCodePoint(Number.parseInt($2, 16)))
+		.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt])|\\*`)/gu, "$1"))
+		: /^%/u.test(token) ? hex_to_buffer(token.slice(1))
+		: /^\d/u.test(token) ? number_to_uint(string_to_number(token))
+		: /^\$\d/u.test(token) ? string_to_utf8("$".repeat(string_to_number(token.slice(1))))
+		: string_to_utf8(token);
+	}
+	if(!/^\s*$/u.test(text_to_string(code))) throw SyntaxError("Invalid token");
+})(), ["]"]]));
 
-const hex2buffer = hex => new Uint8Array(Array(hex.length / 2)).map((a, i) => str2num(hex.substr(i * 2, 2).replace(/^(?:0(?!$))*/u, ""), 16)).buffer;
-
-const ast2signals = ast => {
-	const [begin, end, tokens] = serialize(...ast);
-	return deserialize(begin, end, tokens.map(token => {
-		if(typeof token === "symbol") return token;
-		let {value} = token;
-		if(!token.flag){
-			if(/^\\/u.test(value)) return num2uint(str2num(value.slice(1)));
-			if(/^%/u.test(value)) return hex2buffer(value.slice(1));
-			if(/^\$\d/u.test(value)) value = "$".repeat(str2num(value.slice(1)));
-		}
-		return value;
-	}));
-};
-
-const code2signals = code => ast2signals(code2ast(code));
+const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
 
 const reflexion = free => {
 	const check = () => children.size || reflexes.size || free && run(free);
