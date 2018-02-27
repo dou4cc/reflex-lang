@@ -241,7 +241,7 @@ const code_to_list = code => list_unflatten("[", "]", list_concat([["["], (async
 		: /^\$\d/u.test(token) ? string_to_utf8("$".repeat(string_to_number(token.slice(1))))
 		: string_to_utf8(token);
 	}
-	if(!/^\s*$/u.test(text_to_string(code))) throw SyntaxError("Invalid token");
+	if(!/^\s*$/u.test(await text_to_string(code))) throw SyntaxError("Invalid token");
 })(), ["]"]]));
 
 const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
