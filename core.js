@@ -213,6 +213,39 @@ const text_normalize = async function*(text){
 
 const text_to_string = async text => (await list_to_array(text)).join("");
 
+const string_to_number = (a, radix = 10) => {
+	if(a.toLowerCase() !== (a = Number.parseInt(a, radix)).toString(radix) || Number.isNaN(a)) throw_syntax_error();
+	return a;
+};
+
+const hex_to_buffer = hex => new Uint8Array(Array(hex.length / 2)).map((a, i) => string_to_number(hex.substr(i * 2, 2).replace(/^(?:0(?!$))*/u, ""), 16)).buffer;
+
+const code_to_list = code => {
+	const begin = Symbol();
+	const end = Symbol();
+	return list_unflatten(begin, end, list_concat([[begin], (async function*(){
+		code = list_cache(text_normalize(code));
+		let i;
+		while(i = await text_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|[^[#`\s\]]+(?=[[#`\s\]])/gu, code)){
+			const [, token] = [code] = i;
+			code = list_cache(code);
+			if(!/^#/u.test(token)) yield (async () =>
+				token === "[" ? begin
+				: token === "]" ? end
+				: /^`/u.test(token) ? token.slice(1, -1)
+				.replace(/(^|[^\\])\\[nrt]/gu, ($, $1) => $1 + {n: "\n", r: "\r", t: "\t"}[$1])
+				.replace(/(^|[^\\])\\([0-9a-f]+);/giu, ($, $1, $2) => $1 + String.fromCodePoint(Number.parseInt($2, 16)))
+				.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt])|\\*`)/gu, "$1")
+				: /^%/u.test(token) ? hex_to_buffer(token.slice(1).replace(/-/gu, ""))
+				: /^\d/u.test(token) ? string_to_number(token)
+				: /^\$\d/u.test(token) ? "$".repeat(string_to_number(token.slice(1)))
+				: token
+			)();
+		}
+		if(!/^\s*$/u.test(await text_to_string(code))) throw_syntax_error();
+	})(), [end]]));
+};
+
 const string_to_utf8 = async string => new Uint8Array(await list_to_array(list_concat(Array.from(string).map(a => {
 	const f = (a, i) => i ? f(a >> 6, i - 1).concat(0x80 | a & 0x3f) : [];
 	a = a.codePointAt();
@@ -222,13 +255,6 @@ const string_to_utf8 = async string => new Uint8Array(await list_to_array(list_c
 	return array;
 })))).buffer;
 
-const string_to_number = (a, radix = 10) => {
-	if(a.toLowerCase() !== (a = Number.parseInt(a, radix)).toString(radix) || Number.isNaN(a)) throw SyntaxError("Invalid token");
-	return a;
-};
-
-const hex_to_buffer = hex => new Uint8Array(Array(hex.length / 2)).map((a, i) => string_to_number(hex.substr(i * 2, 2).replace(/^(?:0(?!$))*/u, ""), 16)).buffer;
-
 const number_to_uint = number => {
 	if(!Number.isSafeInteger(number) || number < 0) throw TypeError("Only safe natural number can be converted to uint.");
 	const array = [];
@@ -237,31 +263,6 @@ const number_to_uint = number => {
 		number /= 0xff;
 	}
 	return new Uint8Array(array).buffer;
-};
-
-const code_to_list = code => {
-	const begin = Symbol();
-	const end = Symbol();
-	return list_unflatten(begin, end, list_concat([[begin], (async function*(){
-		code = list_cache(text_normalize(code));
-		let i;
-		while(i = await text_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|(?:(?![[#`\]])\S)+(?=\s)/gu, code)) yield (async () => {
-			const [, token] = [code] = i;
-			code = list_cache(code);
-			if(/^#/u.test(token)) continue;
-			yield token === "[" ? begin
-			: token === "]" ? end
-			: /^`/u.test(token) ? string_to_utf8(token.slice(1, -1)
-			.replace(/(^|[^\\])\\[nrt]/gu, ($, $1) => $1 + {n: "\n", r: "\r", t: "\t"}[$1])
-			.replace(/(^|[^\\])\\([0-9a-f]+);/giu, ($, $1, $2) => $1 + String.fromCodePoint(Number.parseInt($2, 16)))
-			.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt])|\\*`)/gu, "$1"))
-			: /^%/u.test(token) ? hex_to_buffer(token.slice(1))
-			: /^\d/u.test(token) ? number_to_uint(string_to_number(token))
-			: /^\$\d/u.test(token) ? string_to_utf8("$".repeat(string_to_number(token.slice(1))))
-			: string_to_utf8(token);
-		})();
-		if(!/^\s*$/u.test(await text_to_string(code))) throw SyntaxError("Invalid token");
-	})(), [end]]));
 };
 
 const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
