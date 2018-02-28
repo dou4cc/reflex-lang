@@ -23,6 +23,10 @@ const throw_call_stack_error = (() => {
 	};
 })();
 
+const throw_syntax_error = () => {
+	throw SyntaxError("Unexpected token");
+};
+
 const catch_all = async fn => {
 	try{
 		return fn();
@@ -40,11 +44,13 @@ const list_uncache = async function*(list){
 		return yield* list;
 	})(list);
 	let value;
-	while(!({value} = await list.next()).done) yield await is_list(value) ? list_uncache(value) : value;
+	while(!({value} = await list.next()).done) yield Promise.resolve(value).then(async a => await is_list(a) ? list_uncache(a) : a);
 };
 
 const for_each = async (list, fn) => {
-	for await(let a of list_uncache(list)) await (fn || (() => {}))(a);
+	list = list_uncache(list);
+	let value;
+	while(!({value} = await list.next()).done) await (fn || (() => {}))(value);
 };
 
 const list_concat = async function*(lists){
@@ -53,8 +59,8 @@ const list_concat = async function*(lists){
 
 const list_to_array = async list => {
 	const array = [];
-	await for_each(list, async a => array.push(await is_list(a) ? await list_to_array(a) : a));
-	return array;
+	await for_each(list, a => array.push(Promise.resolve(a).then(async a => await is_list(a) ? await list_to_array(a) : a)));
+	return Promise.all(array);
 };
 
 const run = async fn => {
@@ -124,7 +130,7 @@ const list_cache = (() => {
 	return list => {
 		const next = () => fn_cache(async () => {
 			const {value, done} = await list.next();
-			if(!done) return [next(), await is_list(value) ? list_cache(value) : value];
+			if(!done) return [next(), Promise.resolve(value).then(async a => await is_list(a) ? list_cache(a) : a)];
 		});
 		if(results.has(list)) return list;
 		list = list_uncache(list);
@@ -139,7 +145,9 @@ const list_cache = (() => {
 })();
 
 const list_map = async function*(fn, list){
-	for await(let a of list_uncache(list)) yield fn(a);
+	list = list_uncache(list);
+	let value;
+	while(!({value} = await list.next()).done) yield Promise.resolve(value).then(fn);
 };
 
 const list_filter = async function*(fn, list){
@@ -150,7 +158,7 @@ const list_flatten = (begin, end, list) => list_concat([[begin], list_concat(lis
 
 const list_unflatten = async function*(begin, end, list){
 	list = list_uncache(list);
-	if(!equal((await list.next()).value, begin)) throw SyntaxError("Invalid token");
+	if(!equal(await (await list.next()).value, begin)) throw_syntax_error();
 	for await(let a of list){
 		if(equal(a, end)) return;
 		if(!equal(a, begin)){
@@ -161,18 +169,18 @@ const list_unflatten = async function*(begin, end, list){
 		yield list_uncache(slice);
 		await for_each(slice);
 	}
-	throw SyntaxError("Invalid token");
+	throw_syntax_error();
 };
 
 const text_match = async (regex, text) => {
-	text = list_uncache(text);
 	regex = new RegExp(regex);
+	text = list_uncache(text);
 	let string = "";
 	let result;
 	while(!(result = regex.exec(string))){
 		const {value, done} = await text.next();
 		if(done) return;
-		string += value;
+		string += await value;
 	}
 	return [list_concat([[string.slice(regex.lastIndex)], text]), ...result];
 };
@@ -183,17 +191,24 @@ const text_match_all = async function*(regex, text){
 };
 
 const text_normalize = async function*(text){
-	let string0;
+	let last_char;
+	let rest;
 	for await(let string of await Promise.resolve(list_concat([text, ["\0"]]))
 		.then(fn_bind(text_match_all, /(?=[^])([^\r]*)(\r(?=[^])\n?)?/gu))
 		.then(fn_bind(list_map, $ => Promise.resolve($).then(list_to_array).then($ => $[1] + ($[2] ? "\n" : ""))))
 	){
-		if(string0) yield string0;
-		string0 = /\0$/u.test(string) && string;
-		if(!string0) yield string;
+		if(rest){
+			yield rest;
+			rest = null;
+		}
+		if(/\0$/u.test(string)){
+			rest = "\0";
+			string = string.slice(0, -1);
+		}
+		yield string;
+		last_char = string.slice(-1) || last_char;
 	}
-	yield string0 = string0.slice(0, -1);
-	if(!/\n$/u.test(string0)) yield "\n";
+	if(last_char !== "\n") yield "\n";
 };
 
 const text_to_string = async text => (await list_to_array(text)).join("");
@@ -224,25 +239,30 @@ const number_to_uint = number => {
 	return new Uint8Array(array).buffer;
 };
 
-const code_to_list = code => list_unflatten("[", "]", list_concat([["["], (async function*(){
-	code = list_cache(code);
-	let i;
-	while(i = await text_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|(?:(?![[#`\]])\S)+(?=\s)/gu, code)){
-		const [, token] = [code] = i;
-		code = list_cache(code);
-		if(/^#/u.test(token)) continue;
-		yield /^[[\]]$/u.test(token) ? token
-		: /^`/u.test(token) ? string_to_utf8(token.slice(1, -1)
-		.replace(/(^|[^\\])\\[nrt]/gu, ($, $1) => $1 + {n: "\n", r: "\r", t: "\t"}[$1])
-		.replace(/(^|[^\\])\\([0-9a-f]+);/giu, ($, $1, $2) => $1 + String.fromCodePoint(Number.parseInt($2, 16)))
-		.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt])|\\*`)/gu, "$1"))
-		: /^%/u.test(token) ? hex_to_buffer(token.slice(1))
-		: /^\d/u.test(token) ? number_to_uint(string_to_number(token))
-		: /^\$\d/u.test(token) ? string_to_utf8("$".repeat(string_to_number(token.slice(1))))
-		: string_to_utf8(token);
-	}
-	if(!/^\s*$/u.test(await text_to_string(code))) throw SyntaxError("Invalid token");
-})(), ["]"]]));
+const code_to_list = code => {
+	const begin = Symbol();
+	const end = Symbol();
+	return list_unflatten(begin, end, list_concat([[begin], (async function*(){
+		code = list_cache(text_normalize(code));
+		let i;
+		while(i = await text_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|(?:(?![[#`\]])\S)+(?=\s)/gu, code)) yield (async () => {
+			const [, token] = [code] = i;
+			code = list_cache(code);
+			if(/^#/u.test(token)) continue;
+			yield token === "[" ? begin
+			: token === "]" ? end
+			: /^`/u.test(token) ? string_to_utf8(token.slice(1, -1)
+			.replace(/(^|[^\\])\\[nrt]/gu, ($, $1) => $1 + {n: "\n", r: "\r", t: "\t"}[$1])
+			.replace(/(^|[^\\])\\([0-9a-f]+);/giu, ($, $1, $2) => $1 + String.fromCodePoint(Number.parseInt($2, 16)))
+			.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt])|\\*`)/gu, "$1"))
+			: /^%/u.test(token) ? hex_to_buffer(token.slice(1))
+			: /^\d/u.test(token) ? number_to_uint(string_to_number(token))
+			: /^\$\d/u.test(token) ? string_to_utf8("$".repeat(string_to_number(token.slice(1))))
+			: string_to_utf8(token);
+		})();
+		if(!/^\s*$/u.test(await text_to_string(code))) throw SyntaxError("Invalid token");
+	})(), [end]]));
+};
 
 const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
 
