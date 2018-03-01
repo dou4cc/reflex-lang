@@ -252,13 +252,12 @@ const code_to_list = code => {
 	})(), [end]]));
 };
 
-const string_to_utf8 = async string => new Uint8Array(await list_to_array(list_concat(Array.from(string).map(a => {
-	const f = (a, i) => i ? f(a >> 6, i - 1).concat(0x80 | a & 0x3f) : [];
+const string_to_utf8 = async string => new Uint8Array(await list_to_array(list_concat([...string].map(a => {
 	a = a.codePointAt();
 	if(a < 0x80) return [a];
-	const array = f(a, a = Math.floor(Math.log2(a) / 6) + 1);
-	array[0] |= ~(1 << 8 - a) + 1;
-	return array;
+	const array = [];
+	for(let i = a, j = a = Math.floor(Math.log2(a) / 6) + 1; j; i >>= 6, j -= 1) array.unshift(0x80 | i & 0x3f);
+	return [array.shift() | ~(1 << 8 - a) + 1, ...array];
 })))).buffer;
 
 const number_to_uint = number => {
@@ -269,6 +268,29 @@ const number_to_uint = number => {
 		number /= 0xff;
 	}
 	return new Uint8Array(array).buffer;
+};
+
+const is_buffer = a => {
+	try{
+		Reflect.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get.call(a);
+		return new Uint8Array(a).buffer;
+	}catch(error){
+		if(!(error instanceof TypeError)) throw error;
+	}
+};
+
+const buffer_to_binary = buffer => [...new Uint8Array(buffer)].map(a => String.fromCodePoint(a)).join("");
+
+const is_string = a => typeof a === "string";
+
+const is_number = a => typeof a === "number";
+
+const list_normalize = async list => {
+	if(await is_list(list)) return list_map(list_normalize, list);
+	if(is_buffer(list)) return buffer_to_binary(list);
+	if(is_string(list)) return buffer_to_binary(await string_to_utf8(list));
+	if(is_number(list)) return buffer_to_binary(number_to_uint(list));
+	return list;
 };
 
 const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
@@ -321,17 +343,6 @@ const path_map = free => {
 	};
 };
 
-const is_buffer = a => {
-	try{
-		Reflect.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get.call(a);
-		return new Uint8Array(a).buffer;
-	}catch(error){
-		if(!(error instanceof TypeError)) throw error;
-	}
-};
-
-const buffer2bin = buffer => Array.from(new Uint8Array(buffer)).map(a => String.fromCodePoint(a)).join("");
-
 const str2utf8 = string => new Uint8Array([].concat(...Array.from(string).map(a => {
 	const f = (a, i) => i ? f(a >> 6, i - 1).concat(0x80 | a & 0x3f) : [];
 	a = a.codePointAt();
@@ -344,8 +355,6 @@ const str2utf8 = string => new Uint8Array([].concat(...Array.from(string).map(a 
 const str2bin = string => buffer2bin(str2utf8(string));
 
 const bin2buffer = binary => new Uint8Array(Array.from(binary).map(a => a.codePointAt())).buffer;
-
-const is_str = a => typeof a === "string";
 
 const is_param = a => is_str(a) && /^\$*$/u.test(a);
 
