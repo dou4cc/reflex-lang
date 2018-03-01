@@ -39,27 +39,28 @@ const is_object = async a => Boolean(await catch_all(() => new WeakSet([a])));
 
 const is_list = async a => await is_object(a) && Boolean(await catch_all(() => [[] = Symbol.asyncIterator in a ? {[Symbol.iterator]: a[Symbol.asyncIterator]} : a]));
 
-const list_uncache = async function*(list){
+const list_uncache = async list => await is_list(list) ? (async function*(){
 	list = (async function*(list){
 		return yield* list;
 	})(list);
 	let value;
-	while(!({value} = await list.next()).done) yield Promise.resolve(value).then(async a => await is_list(a) ? list_uncache(a) : a);
-};
+	while(!({value} = await list.next()).done) yield Promise.resolve(value).then(list_uncache);
+})() : list;
 
 const for_each = async (list, fn) => {
-	list = list_uncache(list);
+	list = await list_uncache(list);
 	let value;
 	while(!({value} = await list.next()).done) await (fn || (() => {}))(value);
 };
 
 const list_concat = async function*(lists){
-	for await(let list of list_uncache(lists)) yield* list_uncache(list);
+	for await(let list of await list_uncache(lists)) yield* await list_uncache(list);
 };
 
 const list_to_array = async list => {
+	if(!await is_list(list)) return list;
 	const array = [];
-	await for_each(list, a => array.push(Promise.resolve(a).then(async a => await is_list(a) ? await list_to_array(a) : a)));
+	await for_each(list, a => array.push(Promise.resolve(a).then(list_to_array)));
 	return Promise.all(array);
 };
 
@@ -85,17 +86,17 @@ const thread = () => {
 };
 
 const list_any = async (fn, list) => {
-	for await(let a of list_uncache(list)) if(!await fn(a)) return false;
+	for await(let a of await list_uncache(list)) if(!await fn(a)) return false;
 	return true;
 };
 
 const list_exist = async (fn, list) => {
-	for await(let a of list_uncache(list)) if(await fn(a)) return true;
+	for await(let a of await list_uncache(list)) if(await fn(a)) return true;
 	return false;
 };
 
 const list_equal = async (a, b) => {
-	b = list_uncache(b);
+	b = await list_uncache(b);
 	return list_any(async a => {
 		const i = await b.next();
 		return !i.done && equal(a, i.value);
@@ -127,13 +128,14 @@ const fn_cache = fn => {
 
 const list_cache = (() => {
 	const results = new WeakSet;
-	return list => {
+	return async list => {
 		const next = () => fn_cache(async () => {
 			const {value, done} = await list.next();
-			if(!done) return [next(), Promise.resolve(value).then(async a => await is_list(a) ? list_cache(a) : a)];
+			if(!done) return [next(), Promise.resolve(value).then(list_cache)];
 		});
+		if(!await is_list(list)) return list;
 		if(results.has(list)) return list;
-		list = list_uncache(list);
+		list = await list_uncache(list);
 		const entry = next();
 		const result = {async *[Symbol.asyncIterator](){
 			let i = entry;
@@ -145,19 +147,22 @@ const list_cache = (() => {
 })();
 
 const list_map = async function*(fn, list){
-	list = list_uncache(list);
+	list = await list_uncache(list);
 	let value;
 	while(!({value} = await list.next()).done) yield Promise.resolve(value).then(fn);
 };
 
 const list_filter = async function*(fn, list){
-	for await(let a of list_uncache(list)) if(await fn(a)) yield a;
+	for await(let a of await list_uncache(list)) if(await fn(a)) yield a;
 };
 
-const list_flatten = (begin, end, list) => list_concat([[begin], list_concat(list_map(async a => await is_list(a) ? list_flatten(begin, end, a) : [a], list)), [end]]);
+const list_flatten = async function*(begin, end, list){
+	if(await is_list(list)) return yield* list_concat([[begin], list_concat(list_map(fn_bind(list_flatten, begin, end), list)), [end]]);
+	yield list;
+};
 
 const list_unflatten = async function*(begin, end, list){
-	list = list_uncache(list);
+	list = await list_uncache(list);
 	if(!equal(await (await list.next()).value, begin)) throw_syntax_error();
 	for await(let a of list){
 		if(equal(a, end)) return;
@@ -165,7 +170,7 @@ const list_unflatten = async function*(begin, end, list){
 			yield a;
 			continue;
 		}
-		const slice = list_cache(list_unflatten(begin, end, list_concat([[begin], list])));
+		const slice = await list_cache(list_unflatten(begin, end, list_concat([[begin], list])));
 		yield list_uncache(slice);
 		await for_each(slice);
 	}
@@ -174,7 +179,7 @@ const list_unflatten = async function*(begin, end, list){
 
 const text_match = async (regex, text) => {
 	regex = new RegExp(regex);
-	text = list_uncache(text);
+	text = await list_uncache(text);
 	let string = "";
 	let result;
 	while(!(result = regex.exec(string))){
@@ -191,9 +196,10 @@ const text_match_all = async function*(regex, text){
 };
 
 const text_normalize = async function*(text){
-	let last_char;
+	let end;
 	let rest;
-	for await(let string of await Promise.resolve(list_concat([text, ["\0"]]))
+	for await(let string of
+		await Promise.resolve(list_concat([text, ["\0"]]))
 		.then(fn_bind(text_match_all, /(?=[^])([^\r]*)(\r(?=[^])\n?)?/gu))
 		.then(fn_bind(list_map, $ => Promise.resolve($).then(list_to_array).then($ => $[1] + ($[2] ? "\n" : ""))))
 	){
@@ -206,9 +212,9 @@ const text_normalize = async function*(text){
 			string = string.slice(0, -1);
 		}
 		yield string;
-		last_char = string.slice(-1) || last_char;
+		end = string.slice(-1) || end;
 	}
-	if(last_char !== "\n") yield "\n";
+	if(end !== "\n") yield "\n";
 };
 
 const text_to_string = async text => (await list_to_array(text)).join("");
@@ -224,11 +230,11 @@ const code_to_list = code => {
 	const begin = Symbol();
 	const end = Symbol();
 	return list_unflatten(begin, end, list_concat([[begin], (async function*(){
-		code = list_cache(text_normalize(code));
+		code = await list_cache(text_normalize(code));
 		let i;
 		while(i = await text_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|[^[#`\s\]]+(?=[[#`\s\]])/gu, code)){
 			const [, token] = [code] = i;
-			code = list_cache(code);
+			code = await list_cache(code);
 			if(!/^#/u.test(token)) yield (async () =>
 				token === "[" ? begin
 				: token === "]" ? end
