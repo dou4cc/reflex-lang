@@ -313,7 +313,9 @@ const reflexion = (() => {
 			if(!await enter) yield value;
 		};
 	};
-	
+	const node = (free, count, source) => {
+		const thread0 = thread();
+	};
 })();
 
 const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
