@@ -299,20 +299,21 @@ const list_normalize = async list => {
 
 const reflexion = (() => {
 	const list_enum = async (list0, exit) => {
-		if(!await is_list(list0)) return [];
+		if(!await is_list(list0)) return;
 		list0 = await list_cache(list0);
-		return [, , async function*(){
+		return async function*(){
 			yield exit;
 			const list = await list_uncache(list0);
 			const {value, done} = await list.next();
 			if(done) return;
-			const next = (async () => (await list_enum(await list_cache(list), exit))[2])();
+			const next = (async () => list_enum(await list_cache(list), exit))();
 			yield next;
-			const i = (async () => list_enum(await value, next))();
-			yield (async () => (await i)[2])();
-			if(!(await i).length) yield value;
-		}];
+			const enter = (async () => list_enum(await value, next))();
+			yield enter;
+			if(!await enter) yield value;
+		};
 	};
+	
 })();
 
 const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
