@@ -4,7 +4,7 @@ const equal = (a, b) => [a].includes(b);
 
 const call = async fn => fn();
 
-const throw_call_stack_error = (() => {
+const throw_call_stack_error = (async () => {
 	const samples = [
 		() => {
 			const fn = () => !fn();
@@ -31,7 +31,7 @@ const catch_all = async fn => {
 	try{
 		return fn();
 	}catch(error){
-		throw_call_stack_error(error);
+		(await throw_call_stack_error)(error);
 	}
 };
 
@@ -44,7 +44,7 @@ const list_uncache = async list => await is_list(list) ? (async function*(){
 		return yield* list;
 	})(list);
 	let value;
-	while(!({value} = await list.next()).done) yield Promise.resolve(value).then(list_uncache);
+	while(!({value} = await list.next()).done) yield (async () => list_uncache(await value))();
 })() : list;
 
 const for_each = async (list, fn) => {
@@ -60,7 +60,7 @@ const list_concat = async function*(lists){
 const list_to_array = async list => {
 	if(!await is_list(list)) return list;
 	const array = [];
-	await for_each(list, a => array.push(Promise.resolve(a).then(list_to_array)));
+	await for_each(list, a => array.push((async () => list_to_array(await a))()));
 	return Promise.all(array);
 };
 
@@ -131,7 +131,7 @@ const list_cache = (() => {
 	return async list => {
 		const next = () => fn_cache(async () => {
 			const {value, done} = await list.next();
-			if(!done) return [next(), Promise.resolve(value).then(list_cache)];
+			if(!done) return [next(), (async () => list_cache(await value))()];
 		});
 		if(!await is_list(list)) return list;
 		if(results.has(list)) return list;
@@ -149,7 +149,7 @@ const list_cache = (() => {
 const list_map = async function*(fn, list){
 	list = await list_uncache(list);
 	let value;
-	while(!({value} = await list.next()).done) yield Promise.resolve(value).then(fn);
+	while(!({value} = await list.next()).done) yield (async () => fn(await value))();
 };
 
 const list_filter = async function*(fn, list){
@@ -199,9 +199,13 @@ const text_normalize = async function*(text){
 	let end;
 	let rest;
 	for await(let string of
-		await Promise.resolve(list_concat([text, ["\0"]]))
+		await (async () => [text, ["\0"]])()
+		.then(list_concat)
 		.then(fn_bind(text_match_all, /(?=[^])([^\r]*)(\r(?=[^])\n?)?/gu))
-		.then(fn_bind(list_map, $ => Promise.resolve($).then(list_to_array).then($ => $[1] + ($[2] ? "\n" : ""))))
+		.then(fn_bind(list_map, async $ => {
+			$ = await list_to_array($);
+			return $[1] + ($[2] ? "\n" : "");
+		}))
 	){
 		if(rest){
 			yield rest;
@@ -292,6 +296,24 @@ const list_normalize = async list => {
 	if(is_number(list)) return buffer_to_binary(number_to_uint(list));
 	return list;
 };
+
+const reflexion = (() => {
+	const list_enum = async (list0, exit) => {
+		if(!await is_list(list0)) return [];
+		list0 = await list_cache(list0);
+		return [, , async function*(){
+			yield exit;
+			const list = await list_uncache(list0);
+			const {value, done} = await list.next();
+			if(done) return;
+			const next = (async () => (await list_enum(await list_cache(list), exit))[2])();
+			yield next;
+			const i = (async () => list_enum(await value, next))();
+			yield (async () => (await i)[2])();
+			if(!(await i).length) yield value;
+		}];
+	};
+})();
 
 const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
 
