@@ -198,8 +198,8 @@ const text_match_all = async function*(regex, text){
 const text_normalize = async function*(text){
 	let end;
 	let rest;
-	for await(let string of
-		await (async () => [text, ["\0"]])()
+	for await(let string of await
+		(async () => [text, ["\0"]])()
 		.then(list_concat)
 		.then(fn_bind(text_match_all, /(?=[^])([^\r]*)(\r(?=[^])\n?)?/gu))
 		.then(fn_bind(list_map, async $ => {
@@ -313,8 +313,35 @@ const reflexion = (() => {
 			if(!await enter) yield value;
 		};
 	};
-	const node = (free, count, source) => {
-		const thread0 = thread();
+	const node = async (scale, method, path0, listener, free, count0, node0) => {
+		const perform = async (method, path0, listener) => {
+			if(await node0.has(path0, listener))
+			const path = await path_uncache(path0);
+			const {value, done} = await path.next();
+			switch(method){
+			case "on":
+				if(done){
+					listeners[1].add(listener);
+				}else{
+					const [id, key] = await value;
+					children[1][id].set(key,
+						children[1][id].has(key)
+						? (async () => (await children[1][id].get(key)).on(path, listener))()
+						: node(scale, method, path, listener, () => {
+							children[1][id].delete(key);
+							check();
+						})
+					);
+				}
+				break;
+			case "off":
+				
+			}
+		};
+		const listeners = array(2).map(() => new Set);
+		const children = array(2).map(() => array(scale).map(() => new Map));
+		path0 = await path_cache(path0);
+		let count = count0;
 	};
 })();
 
