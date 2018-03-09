@@ -47,10 +47,10 @@ const list_uncache = async list => await is_list(list) ? (async function*(){
 	while(!({value} = await list.next()).done) yield (async () => list_uncache(await value))();
 })() : list;
 
-const for_each = async (list, fn) => {
+const for_each = async (list, fn = () => {}) => {
 	list = await list_uncache(list);
 	let value;
-	while(!({value} = await list.next()).done) await (fn || (() => {}))(value);
+	while(!({value} = await list.next()).done) await fn(value);
 };
 
 const list_concat = async function*(lists){
@@ -297,6 +297,8 @@ const list_normalize = async list => {
 	return list;
 };
 
+const hang = new Promise(() => {});
+
 const reflexion = (() => {
 	const list_enum = async (list0, exit) => {
 		if(!await is_list(list0)) return;
@@ -311,6 +313,18 @@ const reflexion = (() => {
 			const enter = (async () => list_enum(await value, next))();
 			yield enter;
 			if(!await enter) yield value;
+		};
+	};
+	const node = (width, ref) => {
+		const threads = array(2).map(thread);
+		return {
+			on: async (path, listener) => (await threads[0](() => {
+				const promise = (async () => {
+					const listeners = array(2).map(() => Set);
+					const children = array(width).map(() => new Map);
+				})();
+				return [threads[1](() => promise)];
+			}))[0],
 		};
 	};
 	const node = async (scale, method, path0, listener, free, count0, node0) => {
