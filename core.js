@@ -308,7 +308,7 @@ const reflexion = (() => {
 	const node = (width, ref = {
 		child: () => {},
 		threads: array(2).map(thread),
-	}, shared) => {
+	}, forked) => {
 		const assert_not_closed = () => {
 			if(closed) throw TypeError("Closed");
 		};
@@ -318,14 +318,24 @@ const reflexion = (() => {
 			on: async (path, listener) => (await threads[0](() => {
 				assert_not_closed();
 				const promise = (async () => {
-					
+					forked = true;
+					return (await node(width, ref, true).close()).on(path, listener);
 				})();
 				return [threads[1](() => promise)];
 			}))[0],
 			close: () => threads[0](async () => threads[1](async () => {
 				assert_not_closed();
 				closed = true;
-				if(shared)
+				if(!forked) return ref;
+				let used;
+				const thread0 = thread();
+				const listeners = array(2).map(() => Set);
+				const children = array(width).map(() => new Map);
+				return {
+					child: (id, key) => {
+						
+					},
+				};
 			}));
 		};
 	};
