@@ -64,16 +64,6 @@ const list_to_array = async list => {
 	return Promise.all(array);
 };
 
-const run = async fn => {
-	try{
-		await fn();
-	}catch(error){
-		setTimeout(() => {
-			throw error;
-		});
-	}
-};
-
 const fn_bind = (fn, ...args0) => (...args1) => fn(...args0, ...args1);
 
 const thread = () => {
@@ -82,7 +72,7 @@ const thread = () => {
 		while(true) fn = yield await fn();
 	})();
 	thread.next();
-	return task => new Promise((...returns) => run(() => thread.next(() => call(task).then(...returns))));
+	return task => new Promise((...returns) => thread.next(() => call(task).then(...returns)));
 };
 
 const list_any = async (fn, list) => {
@@ -317,35 +307,26 @@ const reflexion = (() => {
 	};
 	const node = (width, ref = {
 		child: () => {},
-	}) => {
-		const fork = async () => {
+		threads: array(2).map(thread),
+	}, shared) => {
+		const assert_not_closed = () => {
+			if(closed) throw TypeError("Closed");
 		};
+		let closed;
 		const threads = array(2).map(thread);
 		return {
 			on: async (path, listener) => (await threads[0](() => {
+				assert_not_closed();
 				const promise = (async () => {
-					let count = ref.count;
-					const listeners = array(2).map(() => Set);
-					const children = array(width).map(() => new Map);
-					path = await list_uncache(path);
-					const {value, done} = await path.next();
-					if(done){
-						listeners[1].add(listener);
-					}else{
-						const [id, key] = await value;
-						children[id].set(key, (async () => {
-							const child = await ref.child(id, key);
-							return node(width, ...child ? [child] : []).on(path, listener);
-						})());
-					}
-					return node(width, {
-						child: (id, key) => {
-							
-						},
-					});
+					
 				})();
 				return [threads[1](() => promise)];
 			}))[0],
+			close: () => threads[0](async () => threads[1](async () => {
+				assert_not_closed();
+				closed = true;
+				if(shared)
+			}));
 		};
 	};
 	const node = async (scale, method, path0, listener, free, count0, node0) => {
