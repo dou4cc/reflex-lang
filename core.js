@@ -117,22 +117,22 @@ const fn_cache = fn => {
 };
 
 const list_cache = (() => {
-	const results = new WeakSet;
-	return async list => {
+	const lists = new WeakSet;
+	return async list0 => {
 		const next = () => fn_cache(async () => {
-			const {value, done} = await list.next();
+			const {value, done} = await list0.next();
 			if(!done) return [next(), (async () => list_cache(await value))()];
 		});
-		if(!await is_list(list)) return list;
-		if(results.has(list)) return list;
-		list = await list_uncache(list);
+		if(!await is_list(list0)) return list0;
+		if(results.has(list0)) return list0;
+		list0 = await list_uncache(list0);
 		const entry = next();
-		const result = {async *[Symbol.asyncIterator](){
+		const list = {async *[Symbol.asyncIterator](){
 			let i = entry;
 			while(i = await i()) yield ([i] = i)[1];
 		}};
-		results.add(result);
-		return result;
+		lists.add(list);
+		return list;
 	};
 })();
 
@@ -305,36 +305,87 @@ const reflexion = (() => {
 			if(!await enter) yield value;
 		};
 	};
-	const node = (width, ref = {
-		child: () => {},
-		threads: array(2).map(thread),
-	}, forked) => {
+	const fork = ref0 => {
+		let {values_count, children_count} = ref0;
+		const thread0 = thread();
+		const values = array(2).map(() => new Set);
+		const children = [Set, Map].map(struct => array(width).map(() => new struct));
+		const ref = {
+			values_count,
+			children_count,
+			child: (id, key) => {
+				if(!children[1][id].has(key)){
+					if(!children_count) return;
+					if(children[0][id].has(key)) return;
+					const child = ref0.child(id, key);
+					if(!child){
+						children[0][id].add(key);
+						return;
+					}
+					children[1][id].set(key, fork(child));
+					children_count -= 1;
+					if(!children_count) children[0].clear();
+				}
+				return children[1][id].get(key);
+			},
+			has: value => {
+				if(values[1].has(value)) return true;
+				if(!values_count) return false;
+				if(values[0].has(value)) return false;
+				if(!ref0.has(value)){
+					values[0].add(value);
+					return false;
+				}
+				values[1].add(value);
+				values_count -= 1;
+				if(!values_count) values[1].clear();
+				return true;
+			},
+			set: async (path, value) => {
+				path = await list_uncache(path);
+				const {value: value1, done} = await path.next();
+				if(done){
+					if(ref.has(value)) return;
+					values[1].add(value);
+					ref.values_count += 1;
+					return;
+				}
+				const [id, key] = await value1;
+				const child = ref.child(id, key) || (() => {
+					const child = fork();
+					children[1][id].add(key, child);
+					return child;
+				})();
+			},
+		};
+		return ref;
+	};
+	const node = (width, ref = fork()) => {
 		const assert_not_closed = () => {
 			if(closed) throw TypeError("Closed");
 		};
 		let closed;
+		let forked;
 		const threads = array(2).map(thread);
 		return {
 			on: async (path, listener) => (await threads[0](() => {
 				assert_not_closed();
 				const promise = (async () => {
 					forked = true;
-					return (await node(width, ref, true).close()).on(path, listener);
+					return (await node(width, fork(ref)).close()).on(path, listener);
 				})();
 				return [threads[1](() => promise)];
 			}))[0],
 			close: () => threads[0](async () => threads[1](async () => {
+				const assert_not_used = () => {
+					if(used) assert_not_closed();
+				};
 				assert_not_closed();
 				closed = true;
-				if(!forked) return ref;
+				if(forked) ref = fork(ref);
 				let used;
-				const thread0 = thread();
-				const listeners = array(2).map(() => Set);
-				const children = array(width).map(() => new Map);
 				return {
-					child: (id, key) => {
-						
-					},
+					on
 				};
 			}));
 		};
