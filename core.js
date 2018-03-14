@@ -305,24 +305,27 @@ const reflexion = (() => {
 			if(!await enter) yield value;
 		};
 	};
-	const fork = ref0 => {
-		let {values_count, children_count} = ref0;
+	const node = (node0 = {
+		child: () => {},
+		has: () => false,
+	}) => {
+		let {values_count, children_count} = node0;
 		const thread0 = thread();
 		const values = array(2).map(() => new Set);
 		const children = [Set, Map].map(struct => array(width).map(() => new struct));
-		const ref = {
+		const node1 = {
 			values_count,
 			children_count,
 			child: (id, key) => {
 				if(!children[1][id].has(key)){
 					if(!children_count) return;
 					if(children[0][id].has(key)) return;
-					const child = ref0.child(id, key);
+					const child = node0.child(id, key);
 					if(!child){
 						children[0][id].add(key);
 						return;
 					}
-					children[1][id].set(key, fork(child));
+					children[1][id].set(key, node(child));
 					children_count -= 1;
 					if(!children_count) children[0].clear();
 				}
@@ -332,7 +335,7 @@ const reflexion = (() => {
 				if(values[1].has(value)) return true;
 				if(!values_count) return false;
 				if(values[0].has(value)) return false;
-				if(!ref0.has(value)){
+				if(!node0.has(value)){
 					values[0].add(value);
 					return false;
 				}
@@ -341,24 +344,28 @@ const reflexion = (() => {
 				if(!values_count) values[1].clear();
 				return true;
 			},
-			set: async (path, value) => {
+			add: async (path, value) => {
 				path = await list_uncache(path);
 				const {value: value1, done} = await path.next();
 				if(done){
-					if(ref.has(value)) return;
+					if(node1.has(value)) return;
 					values[1].add(value);
-					ref.values_count += 1;
+					node1.values_count += 1;
 					return;
 				}
 				const [id, key] = await value1;
-				const child = ref.child(id, key) || (() => {
-					const child = fork();
-					children[1][id].add(key, child);
-					return child;
-				})();
+				if(!node1.child(id, key)){
+					children[1][id].set(key, node());
+					node1.children_count += 1;
+				}
+				await node1.child(id, key).add(path, value);
 			},
+			delete: async (path, value) => {
+				path = await list_uncache(path);
+				const {value: value1, done} = await path.next();
+			};
 		};
-		return ref;
+		return node1;
 	};
 	const node = (width, ref = fork()) => {
 		const assert_not_closed = () => {
