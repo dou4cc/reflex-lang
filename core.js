@@ -287,7 +287,7 @@ const list_normalize = async list => {
 	return list;
 };
 
-const hang = new Promise(() => {});
+const thunk = result => () => result;
 
 const reflexion = (() => {
 	const list_enum = async (list0, exit) => {
@@ -305,12 +305,17 @@ const reflexion = (() => {
 			if(!await enter) yield value;
 		};
 	};
-	const node = (node0 = {
-		child: () => {},
-		has: () => false,
-	}) => {
+	const node = (width, free = () => {}, node0 = {values_count: 0, children_count: 0}) => {
+		const check = () => {
+			if(!node1.values_count && !node1.children_count) free();
+		};
+		const create_child = (id, key, ...rest) => children[1][id].set(key, node(width, () => {
+			if(children_count) children[0][id].add(key);
+			children[1][id].delete(key);
+			check();
+		}, ...rest));
 		let {values_count, children_count} = node0;
-		const thread0 = thread();
+		if(!values_count && !children_count) node0 = null;
 		const values = array(2).map(() => new Set);
 		const children = [Set, Map].map(struct => array(width).map(() => new struct));
 		const node1 = {
@@ -325,9 +330,12 @@ const reflexion = (() => {
 						children[0][id].add(key);
 						return;
 					}
-					children[1][id].set(key, node(child));
+					create_child(id, key, child);
 					children_count -= 1;
-					if(!children_count) children[0].clear();
+					if(!children_count){
+						children[0].clear();
+						if(!values_count) node0 = null;
+					}
 				}
 				return children[1][id].get(key);
 			},
@@ -341,7 +349,10 @@ const reflexion = (() => {
 				}
 				values[1].add(value);
 				values_count -= 1;
-				if(!values_count) values[1].clear();
+				if(!values_count){
+					values[1].clear();
+					if(!children_count) node0 = null;
+				}
 				return true;
 			},
 			add: async (path, value) => {
@@ -355,7 +366,7 @@ const reflexion = (() => {
 				}
 				const [id, key] = await value1;
 				if(!node1.child(id, key)){
-					children[1][id].set(key, node());
+					create_child(id, key);
 					node1.children_count += 1;
 				}
 				await node1.child(id, key).add(path, value);
@@ -363,9 +374,40 @@ const reflexion = (() => {
 			delete: async (path, value) => {
 				path = await list_uncache(path);
 				const {value: value1, done} = await path.next();
-			};
+				if(done){
+					if(!node1.has(value)) return;
+					if(values_count) values[0].add(value);
+					values[1].delete(value);
+					node1.values_count -= 1;
+					check();
+					return;
+				}
+				const [id, key] = await value1;
+				if(node1.child(id, key)) await node1.child(id, key).delete(id, key);
+			},
+			for_each: async (entry, fn) => {
+				if(!entry){
+					if(values_count) node0.for_each(entry, value => node1.has(value) && fn(value));
+					values[1].forEach(value => fn(value));
+					return;
+				}
+				await Promise.all(array(width).map(async (_, id) => {
+					const [next, key] = await entry(id);
+					if(node1.child(id, key)) await node1.child(id, key).for_each(next, fn);
+				}));
+			},
 		};
 		return node1;
+	};
+	return () => {
+		const assert_not_closed = () => {
+			if(closed) throw TypeError("Closed");
+		};
+		let closed;
+		let frozen;
+		const threads = array(2).map(thread);
+		return {
+		};
 	};
 	const node = (width, ref = fork()) => {
 		const assert_not_closed = () => {
@@ -396,36 +438,6 @@ const reflexion = (() => {
 				};
 			}));
 		};
-	};
-	const node = async (scale, method, path0, listener, free, count0, node0) => {
-		const perform = async (method, path0, listener) => {
-			if(await node0.has(path0, listener))
-			const path = await path_uncache(path0);
-			const {value, done} = await path.next();
-			switch(method){
-			case "on":
-				if(done){
-					listeners[1].add(listener);
-				}else{
-					const [id, key] = await value;
-					children[1][id].set(key,
-						children[1][id].has(key)
-						? (async () => (await children[1][id].get(key)).on(path, listener))()
-						: node(scale, method, path, listener, () => {
-							children[1][id].delete(key);
-							check();
-						})
-					);
-				}
-				break;
-			case "off":
-				
-			}
-		};
-		const listeners = array(2).map(() => new Set);
-		const children = array(2).map(() => array(scale).map(() => new Map));
-		path0 = await path_cache(path0);
-		let count = count0;
 	};
 })();
 
