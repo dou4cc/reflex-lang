@@ -2,7 +2,11 @@
 
 const equal = (a, b) => [a].includes(b);
 
-const call = async fn => fn();
+const call = async (...args) => args.pop()(...args);
+
+const throw_unsupported_error = () => {
+	throw TypeError("Unsupported");
+};
 
 const throw_call_stack_error = (async () => {
 	const samples = [
@@ -16,7 +20,7 @@ const throw_call_stack_error = (async () => {
 		}catch(error){
 			return error;
 		}
-		throw ReferenceError("Unexpected behavior");
+		throw_unsupported_error();
 	});
 	return error => {
 		if(samples.some(sample => equal(...[error, sample].map(Reflect.getPrototypeOf)) && equal(error.message, sample.message))) throw error;
@@ -37,7 +41,9 @@ const catch_all = async fn => {
 
 const is_object = async a => Boolean(await catch_all(() => new WeakSet([a])));
 
-const is_list = async a => await is_object(a) && Boolean(await catch_all(() => [[] = Symbol.asyncIterator in a ? {[Symbol.iterator]: a[Symbol.asyncIterator]} : a]));
+const is_list = async a => await is_object(a) && Boolean(await catch_all(() => [] = {[Symbol.iterator]: a[Symbol[[
+	"asyncIterator",
+].find(key => Symbol[key] in a) || "iterator"]]}));
 
 const list_uncache = async list => await is_list(list) ? (async function*(){
 	list = (async function*(list){
@@ -64,7 +70,7 @@ const list_to_array = async list => {
 	return Promise.all(array);
 };
 
-const fn_bind = (fn, ...args0) => (...args1) => fn(...args0, ...args1);
+const fn_bind = (fn, ...args0) => async (...args1) => (await fn)(...args0, ...args1);
 
 const thread = () => {
 	const thread = (async function*(){
@@ -75,15 +81,10 @@ const thread = () => {
 	return task => new Promise((...returns) => thread.next(() => call(task).then(...returns)));
 };
 
-const list_any = async (fn, list) => {
-	for await(let a of await list_uncache(list)) if(!await fn(a)) return false;
-	return true;
-};
-
-const list_exist = async (fn, list) => {
-	for await(let a of await list_uncache(list)) if(await fn(a)) return true;
-	return false;
-};
+const [list_any, list_exist] = [true, false].map(macro => async (fn, list) => {
+	for await(let a of await list_uncache(list)) if(macro ^ Boolean(await fn(a))) return !macro;
+	return macro;
+});
 
 const list_equal = async (a, b) => {
 	b = await list_uncache(b);
@@ -290,30 +291,31 @@ const list_normalize = async list => {
 const thunk = result => () => result;
 
 const reflexion = (() => {
-	const list_enum = async (list0, exit) => {
-		if(!await is_list(list0)) return;
-		list0 = await list_cache(list0);
-		return async function*(){
-			yield exit;
-			const list = await list_uncache(list0);
+	const enum = (list0, exit0) => {
+		list0 = (async () => await is_list(list0) && list_cache(list0))();
+		return async index => methods[index] === "enter" && await list0 ? [async index => {
+			if(methods[index] === "exit") return [exit0];
+			const list = await list_uncache(await list0);
 			const {value, done} = await list.next();
-			if(done) return;
-			const next = (async () => list_enum(await list_cache(list), exit))();
-			yield next;
-			const enter = (async () => list_enum(await value, next))();
-			yield enter;
-			if(!await enter) yield value;
-		};
+			const exit = fn_bind((async () => (await enum(await list_cache(list), exit0)(methods.indexOf("enter")))[0])());
+			const [tuple = () => []] = [new Map([
+				["done", () => [exit, done]],
+				["enter", async () => enum(await value, exit)(methods.indexOf("enter"))],
+				["next", async () => [exit, await value]],
+			]).get(methods[index])];
+			return tuple();
+		}] : [];
 	};
-	const node = (width, free = () => {}, node0 = {values_count: 0, children_count: 0}) => {
+	const node = (width, node0 = {values_count: 0, children_count: 0}, free = () => {}) => {
 		const check = () => {
 			if(!node1.values_count && !node1.children_count) free();
 		};
-		const create_child = (id, key, ...rest) => children[1][id].set(key, node(width, () => {
-			if(children_count) children[0][id].add(key);
-			children[1][id].delete(key);
+		const create_child = (index, key, child) => children[1][index].set(key, node(width, child, () => {
+			if(children_count) children[0][index].add(key);
+			children[1][index].delete(key);
 			check();
-		}, ...rest));
+		}));
+		const default = Symbol();
 		let {values_count, children_count} = node0;
 		if(!values_count && !children_count) node0 = null;
 		const values = array(2).map(() => new Set);
@@ -321,23 +323,23 @@ const reflexion = (() => {
 		const node1 = {
 			values_count,
 			children_count,
-			child: (id, key) => {
-				if(!children[1][id].has(key)){
+			child: (index, key) => {
+				if(!children[1][index].has(key)){
 					if(!children_count) return;
-					if(children[0][id].has(key)) return;
-					const child = node0.child(id, key);
+					if(children[0][index].has(key)) return;
+					const child = node0.child(index, key);
 					if(!child){
-						children[0][id].add(key);
+						children[0][index].add(key);
 						return;
 					}
-					create_child(id, key, child);
+					create_child(index, key, child);
 					children_count -= 1;
 					if(!children_count){
 						children[0].clear();
 						if(!values_count) node0 = null;
 					}
 				}
-				return children[1][id].get(key);
+				return children[1][index].get(key);
 			},
 			has: value => {
 				if(values[1].has(value)) return true;
@@ -357,23 +359,23 @@ const reflexion = (() => {
 			},
 			add: async (path, value) => {
 				path = await list_uncache(path);
-				const {value: value1, done} = await path.next();
+				const {value: tuple, done} = await path.next();
 				if(done){
 					if(node1.has(value)) return;
 					values[1].add(value);
 					node1.values_count += 1;
 					return;
 				}
-				const [id, key] = await value1;
-				if(!node1.child(id, key)){
-					create_child(id, key);
+				const [index, key] = await list_to_array(await tuple);
+				if(!node1.child(index, key)){
+					create_child(index, key);
 					node1.children_count += 1;
 				}
-				await node1.child(id, key).add(path, value);
+				await node1.child(index, key).add(path, value);
 			},
 			delete: async (path, value) => {
 				path = await list_uncache(path);
-				const {value: value1, done} = await path.next();
+				const {value: tuple, done} = await path.next();
 				if(done){
 					if(!node1.has(value)) return;
 					if(values_count) values[0].add(value);
@@ -382,33 +384,88 @@ const reflexion = (() => {
 					check();
 					return;
 				}
-				const [id, key] = await value1;
-				if(node1.child(id, key)) await node1.child(id, key).delete(id, key);
+				const [index, key] = await list_to_array(await tuple);
+				if(node1.child(index, key)) await node1.child(index, key).delete(index, key);
 			},
-			for_each: async (entry, fn) => {
-				if(!entry){
+			for_each: async (entry = default, fn) => {
+				if(entry === default){
 					if(values_count) node0.for_each(entry, value => node1.has(value) && fn(value));
-					values[1].forEach(value => fn(value));
+					values[1].forEach(async value => fn(value));
 					return;
 				}
-				await Promise.all(array(width).map(async (_, id) => {
-					const [next, key] = await entry(id);
-					if(node1.child(id, key)) await node1.child(id, key).for_each(next, fn);
+				await Promise.all(array(width).map(async (_, index) => {
+					const [next, key] = await entry(index);
+					if(node1.child(index, key)) await node1.child(index, key).for_each(next, fn);
 				}));
 			},
 		};
 		return node1;
 	};
-	return () => {
+	const reflexion = (wildcard, ref0 = node(methods.length)) => {
+		const path = pattern => list_map(async tuple => list_concat([[methods.indexOf(await (await tuple.next()).value)], tuple]), (async function*(){
+			let matching;
+			for await(let a of list_flatten(begin, end, pattern)){
+				if(matching){
+					matching = false;
+					if(a === end){
+						yield ["exit"];
+						continue;
+					}
+					yield ["done", false];
+				}
+				if(a === wildcard){
+					matching = true;
+					continue;
+				}
+				yield*
+					a === begin ? [["enter"]]
+					: a === end ? [
+						["done", true],
+						["exit"],
+					]
+					: [["next", a]];
+			}
+		})());
 		const assert_not_closed = () => {
 			if(closed) throw TypeError("Closed");
 		};
+		const begin = Symbol();
+		const end = Symbol();
 		let closed;
 		let frozen;
 		const threads = array(2).map(thread);
-		return {
+		const reflexion0 = {
+			on: async (pattern, reflex) => (await threads[0](() => thunk(threads[1](thunk((async () => {
+				assert_not_closed();
+				frozen = true;
+				const ref = node(methods.length, ref0);
+				await ref.add(path(pattern), reflex);
+				return reflexion(wildcard, ref);
+			})())))))(),
+			off: async (pattern, reflex) => (await threads[0](() => thunk(threads[1](thunk((async () => {
+				assert_not_closed();
+				frozen = true;
+				const ref = node(methods.length, ref0);
+				await ref.delete(path(pattern), reflex);
+				return reflexion(wildcard, ref);
+			})())))))(),
+			emit: message => {
+				threads[0](() => threads[1](async () => {
+					assert_not_closed();
+					message = await list_cache(message);
+					await ref0.for_each(enum(message), reflex => reflex(reflexion0));
+				}));
+			},
 		};
+		return reflexion0;
 	};
+	const methods = [
+		"done",
+		"enter",
+		"exit",
+		"next",
+	];
+	return wildcard => reflexion(wildcard);
 	const node = (width, ref = fork()) => {
 		const assert_not_closed = () => {
 			if(closed) throw TypeError("Closed");
