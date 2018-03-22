@@ -125,7 +125,7 @@ const list_cache = (() => {
 			if(!done) return [next(), (async () => list_cache(await value))()];
 		});
 		if(!await is_list(list0)) return list0;
-		if(results.has(list0)) return list0;
+		if(lists.has(list0)) return list0;
 		list0 = await list_uncache(list0);
 		const entry = next();
 		const list = {async *[Symbol.asyncIterator](){
@@ -168,31 +168,31 @@ const list_unflatten = async function*(begin, end, list){
 	throw_syntax_error();
 };
 
-const text_match = async (regex, text) => {
+const strings_match = async (regex, strings) => {
 	regex = new RegExp(regex);
-	text = await list_uncache(text);
+	strings = await list_uncache(strings);
 	let string = "";
-	let result;
-	while(!(result = regex.exec(string))){
-		const {value, done} = await text.next();
+	let $;
+	while(!($ = regex.exec(string))){
+		const {value, done} = await strings.next();
 		if(done) return;
 		string += await value;
 	}
-	return [list_concat([[string.slice(regex.lastIndex)], text]), ...result];
+	return [list_concat([[string.slice(regex.lastIndex)], strings]), ...$];
 };
 
-const text_match_all = async function*(regex, text){
+const strings_match_all = async function*(regex, strings){
 	let i;
-	while(i = await text_match(regex, text)) yield ([text] = i).slice(1);
+	while(i = await strings_match(regex, strings)) yield ([strings] = i).slice(1);
 };
 
-const text_normalize = async function*(text){
+const strings_normalize = async function*(strings){
 	let end;
 	let rest;
 	for await(let string of await
-		(async () => [text, ["\0"]])()
+		(async () => [strings, ["\0"]])()
 		.then(list_concat)
-		.then(fn_bind(text_match_all, /(?=[^])([^\r]*)(\r(?=[^])\n?)?/gu))
+		.then(fn_bind(strings_match_all, /(?=[^])([^\r]*)(\r(?=[^])\n?)?/gu))
 		.then(fn_bind(list_map, async $ => {
 			$ = await list_to_array($);
 			return $[1] + ($[2] ? "\n" : "");
@@ -212,7 +212,7 @@ const text_normalize = async function*(text){
 	if(end !== "\n") yield "\n";
 };
 
-const text_to_string = async text => (await list_to_array(text)).join("");
+const string_concat = async strings => (await list_to_array(strings)).join("");
 
 const string_to_number = (a, radix = 10) => {
 	if(a.toLowerCase() !== (a = Number.parseInt(a, radix)).toString(radix) || Number.isNaN(a)) throw_syntax_error();
@@ -225,17 +225,21 @@ const code_to_list = code => {
 	const begin = Symbol();
 	const end = Symbol();
 	return list_unflatten(begin, end, list_concat([[begin], (async function*(){
-		code = await list_cache(text_normalize(code));
+		code = await list_cache(strings_normalize(code));
 		let i;
-		while(i = await text_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|[^[#`\s\]]+(?=[[#`\s\]])/gu, code)){
+		while(i = await strings_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|[^[#`\s\]]+(?=[[#`\s\]])/gu, code)){
 			const [, token] = [code] = i;
 			code = await list_cache(code);
 			if(!/^#/u.test(token)) yield (async () =>
 				token === "[" ? begin
 				: token === "]" ? end
 				: /^`/u.test(token) ? token.slice(1, -1)
-				.replace(/(^|[^\\])\\[nrt]/gu, ($, $1) => $1 + {n: "\n", r: "\r", t: "\t"}[$1])
-				.replace(/(^|[^\\])\\([0-9a-f]+);/giu, ($, $1, $2) => $1 + String.fromCodePoint(Number.parseInt($2, 16)))
+				.replace(/(^|[^\\])\\([nrt])/gu, (...$) => $[1] + new Map([
+					["n", "\n"],
+					["r", "\r"],
+					["t", "\t"],
+				]).get($[2]))
+				.replace(/(^|[^\\])\\([0-9a-f]+);/giu, (...$) => $[1] + String.fromCodePoint(Number.parseInt($[2], 16)))
 				.replace(/\\(\\+(?:[0-9A-Fa-f]+;|[nrt])|\\*`)/gu, "$1")
 				: /^%/u.test(token) ? hex_to_buffer(token.slice(1).replace(/-/gu, ""))
 				: /^\d/u.test(token) ? string_to_number(token)
@@ -243,7 +247,7 @@ const code_to_list = code => {
 				: token
 			)();
 		}
-		if(!/^\s*$/u.test(await text_to_string(code))) throw_syntax_error();
+		if(!/^\s*$/u.test(await string_concat(code))) throw_syntax_error();
 	})(), [end]]));
 };
 
@@ -291,19 +295,19 @@ const list_normalize = async list => {
 const thunk = result => () => result;
 
 const reflexion = (() => {
-	const enum = (list0, exit0) => {
+	const list_enum = (list0, exit0) => {
 		list0 = (async () => await is_list(list0) && list_cache(list0))();
 		return async index => methods[index] === "enter" && await list0 ? [async index => {
 			if(methods[index] === "exit") return [exit0];
 			const list = await list_uncache(await list0);
 			const {value, done} = await list.next();
-			const exit = fn_bind((async () => (await enum(await list_cache(list), exit0)(methods.indexOf("enter")))[0])());
-			const [tuple = () => []] = [new Map([
+			const exit = fn_bind((async () => (await list_enum(await list_cache(list), exit0)(methods.indexOf("enter")))[0])());
+			const [i = () => []] = [new Map([
 				["done", () => [exit, done]],
-				["enter", async () => enum(await value, exit)(methods.indexOf("enter"))],
+				["enter", async () => list_enum(await value, exit)(methods.indexOf("enter"))],
 				["next", async () => [exit, await value]],
 			]).get(methods[index])];
-			return tuple();
+			return i();
 		}] : [];
 	};
 	const node = (width, node0 = {values_count: 0, children_count: 0}, free = () => {}) => {
@@ -315,7 +319,7 @@ const reflexion = (() => {
 			children[1][index].delete(key);
 			check();
 		}));
-		const default = Symbol();
+		const symbol = Symbol();
 		let {values_count, children_count} = node0;
 		if(!values_count && !children_count) node0 = null;
 		const values = array(2).map(() => new Set);
@@ -387,8 +391,8 @@ const reflexion = (() => {
 				const [index, key] = await list_to_array(await tuple);
 				if(node1.child(index, key)) await node1.child(index, key).delete(index, key);
 			},
-			for_each: async (entry = default, fn) => {
-				if(entry === default){
+			for_each: async (entry = symbol, fn) => {
+				if(entry === symbol){
 					if(values_count) node0.for_each(entry, value => node1.has(value) && fn(value));
 					values[1].forEach(async value => fn(value));
 					return;
@@ -401,8 +405,7 @@ const reflexion = (() => {
 		};
 		return node1;
 	};
-	const reflexion = (wildcard, ref0 = node(methods.length)) => {
-		const path = pattern => list_map(async tuple => list_concat([[methods.indexOf(await (await tuple.next()).value)], tuple]), (async function*(){
+			const begin = Symbol();
 			let matching;
 			for await(let a of list_flatten(begin, end, pattern)){
 				if(matching){
@@ -430,33 +433,57 @@ const reflexion = (() => {
 			if(closed) throw TypeError("Closed");
 		};
 		const begin = Symbol();
-		const end = Symbol();
-		let closed;
-		let frozen;
-		const threads = array(2).map(thread);
-		const reflexion0 = {
-			on: async (pattern, reflex) => (await threads[0](() => thunk(threads[1](thunk((async () => {
-				assert_not_closed();
-				frozen = true;
-				const ref = node(methods.length, ref0);
-				await ref.add(path(pattern), reflex);
-				return reflexion(wildcard, ref);
-			})())))))(),
-			off: async (pattern, reflex) => (await threads[0](() => thunk(threads[1](thunk((async () => {
-				assert_not_closed();
-				frozen = true;
-				const ref = node(methods.length, ref0);
-				await ref.delete(path(pattern), reflex);
-				return reflexion(wildcard, ref);
-			})())))))(),
-			emit: message => {
-				threads[0](() => threads[1](async () => {
-					assert_not_closed();
-					message = await list_cache(message);
-					await ref0.for_each(enum(message), reflex => reflex(reflexion0));
-				}));
-			},
+			["on", "add"],
+			["off", "delete"],
+		].forEach(macro => reflexion[macro[0]] = fn(async (ref, pattern, reflex) => ref[macro[1]](path(pattern), reflex)));
+		const emit = async message => {
+			message = await list_cache(message);
+			await ref0.for_each(list_enum(message), fn_bind(call, reflexion0));
 		};
+		let closed;
+		const threads = array(2).map(thread);
+		const reflexion0 = {};
+		define_commit(reflexion0, commit => async (...args) => (await threads[0](() => thunk(threads[1](thunk((async () => {
+			assert_not_closed();
+			forked = true;
+			const ref = node(methods.length, ref0);
+			await commit(ref, ...args);
+			return reflexion(wildcard, ref);
+		})())))))());
+		reflexion0.emit = (...args) => {
+			threads[0](() => threads[1](async () => {
+				assert_not_closed();
+				await emit(...args);
+			}));
+		};
+		reflexion0.close = async () => threads[0](() => threads[1](async () => {
+			const reflexion1 = () => {
+				const assert_not_used = () => {
+					if(used) assert_not_closed();
+				};
+				let used;
+				const thread0 = thread();
+				const reflexion0 = {};
+				define_commit(reflexion0, commit => async (...args) => thread0(async () => {
+					assert_not_used();
+					used = true;
+					await commit(ref0, ...args);
+					return reflexion1();
+				}));
+				reflexion0.emit = (...args) => {
+					threads0(async () => {
+						assert_not_used();
+						await emit(...args);
+					});
+				};
+				reflexion0.close = () => {};
+				return reflexion0;
+			};
+			if(closed) return;
+			closed = true;
+			if(forked) return reflexion(wildcard, ref0, forked);
+			return reflexion1();
+		}));
 		return reflexion0;
 	};
 	const methods = [
@@ -466,36 +493,6 @@ const reflexion = (() => {
 		"next",
 	];
 	return wildcard => reflexion(wildcard);
-	const node = (width, ref = fork()) => {
-		const assert_not_closed = () => {
-			if(closed) throw TypeError("Closed");
-		};
-		let closed;
-		let forked;
-		const threads = array(2).map(thread);
-		return {
-			on: async (path, listener) => (await threads[0](() => {
-				assert_not_closed();
-				const promise = (async () => {
-					forked = true;
-					return (await node(width, fork(ref)).close()).on(path, listener);
-				})();
-				return [threads[1](() => promise)];
-			}))[0],
-			close: () => threads[0](async () => threads[1](async () => {
-				const assert_not_used = () => {
-					if(used) assert_not_closed();
-				};
-				assert_not_closed();
-				closed = true;
-				if(forked) ref = fork(ref);
-				let used;
-				return {
-					on
-				};
-			}));
-		};
-	};
 })();
 
 const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
