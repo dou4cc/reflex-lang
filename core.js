@@ -405,7 +405,10 @@ const reflexion = (() => {
 		};
 		return node1;
 	};
+	const reflexion = (wildcard, ref0 = node(methods.length), forked) => {
+		const path = pattern => list_map(async i => list_concat([[methods.indexOf(await (await i.next()).value)], i]), (async function*(){
 			const begin = Symbol();
+			const end = Symbol();
 			let matching;
 			for await(let a of list_flatten(begin, end, pattern)){
 				if(matching){
@@ -432,7 +435,7 @@ const reflexion = (() => {
 		const assert_not_closed = () => {
 			if(closed) throw TypeError("Closed");
 		};
-		const begin = Symbol();
+		const define_commit = (reflexion, fn) => [
 			["on", "add"],
 			["off", "delete"],
 		].forEach(macro => reflexion[macro[0]] = fn(async (ref, pattern, reflex) => ref[macro[1]](path(pattern), reflex)));
