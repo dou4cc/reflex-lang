@@ -319,7 +319,7 @@ const reflexion = (() => {
 			children[1][index].delete(key);
 			check();
 		}));
-		const symbol = Symbol();
+		const placeholder = Symbol();
 		let {values_count, children_count} = node0;
 		if(!values_count && !children_count) node0 = null;
 		const values = array(2).map(() => new Set);
@@ -363,14 +363,14 @@ const reflexion = (() => {
 			},
 			add: async (path, value) => {
 				path = await list_uncache(path);
-				const {value: tuple, done} = await path.next();
+				const {value: i, done} = await path.next();
 				if(done){
 					if(node1.has(value)) return;
 					values[1].add(value);
 					node1.values_count += 1;
 					return;
 				}
-				const [index, key] = await list_to_array(await tuple);
+				const [index, key] = await list_to_array(await i);
 				if(!node1.child(index, key)){
 					create_child(index, key);
 					node1.children_count += 1;
@@ -379,7 +379,7 @@ const reflexion = (() => {
 			},
 			delete: async (path, value) => {
 				path = await list_uncache(path);
-				const {value: tuple, done} = await path.next();
+				const {value: i, done} = await path.next();
 				if(done){
 					if(!node1.has(value)) return;
 					if(values_count) values[0].add(value);
@@ -388,11 +388,11 @@ const reflexion = (() => {
 					check();
 					return;
 				}
-				const [index, key] = await list_to_array(await tuple);
+				const [index, key] = await list_to_array(await i);
 				if(node1.child(index, key)) await node1.child(index, key).delete(index, key);
 			},
-			for_each: async (entry = symbol, fn) => {
-				if(entry === symbol){
+			for_each: async (entry = placeholder, fn) => {
+				if(entry === placeholder){
 					if(values_count) node0.for_each(entry, value => node1.has(value) && fn(value));
 					values[1].forEach(async value => fn(value));
 					return;
@@ -438,7 +438,7 @@ const reflexion = (() => {
 		const define_commit = (reflexion, fn) => [
 			["on", "add"],
 			["off", "delete"],
-		].forEach(macro => reflexion[macro[0]] = fn(async (ref, pattern, reflex) => ref[macro[1]](path(pattern), reflex)));
+		].forEach(macros => reflexion[macros[0]] = fn(async (ref, pattern, reflex) => ref[macros[1]](path(pattern), reflex)));
 		const emit = async message => {
 			message = await list_cache(message);
 			await ref0.for_each(list_enum(message), fn_bind(call, reflexion0));
