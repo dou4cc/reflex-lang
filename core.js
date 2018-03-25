@@ -143,6 +143,8 @@ const list_map = async function*(fn, list){
 	while(!({value} = await list.next()).done) yield (async () => fn(await value))();
 };
 
+const list_flat_map = async (fn, list) => await is_list(list) ? list_map(fn_bind(list_flat_map, fn), list) : fn(list);
+
 const list_filter = async function*(fn, list){
 	for await(let a of await list_uncache(list)) if(await fn(a)) yield a;
 };
@@ -301,11 +303,11 @@ const reflexion = (() => {
 			if(methods[index] === "exit") return [exit0];
 			const list = await list_uncache(await list0);
 			const {value, done} = await list.next();
-			const exit = fn_bind((async () => (await list_enum(await list_cache(list), exit0)(methods.indexOf("enter")))[0])());
+			const exit = fn_bind((async () => (await list_enum(list, exit0)(methods.indexOf("enter")))[0])());
 			const [i = () => []] = [new Map([
 				["done", () => [exit, done]],
 				["enter", async () => list_enum(await value, exit)(methods.indexOf("enter"))],
-				["next", async () => [exit, await value]],
+				["next", async () => [exit, done ? Symbol() : await value]],
 			]).get(methods[index])];
 			return i();
 		}] : [];
@@ -441,7 +443,7 @@ const reflexion = (() => {
 		].forEach(macros => reflexion[macros[0]] = fn(async (ref, pattern, reflex) => ref[macros[1]](path(pattern), reflex)));
 		const emit = async message => {
 			message = await list_cache(message);
-			await ref0.for_each(list_enum(message), fn_bind(call, reflexion0));
+			await ref0.for_each(list_enum(message), fn_bind(call, reflexion0, message));
 		};
 		let closed;
 		const threads = array(2).map(thread);
