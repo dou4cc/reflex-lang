@@ -421,7 +421,7 @@ const reflexion = (() => {
 					}
 					yield ["done", false];
 				}
-				if(a === wildcard){
+				if(equal(a, wildcard)){
 					matching = true;
 					continue;
 				}
