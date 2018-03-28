@@ -224,8 +224,7 @@ const string_to_number = (a, radix = 10) => {
 const hex_to_buffer = hex => new Uint8Array(Array(hex.length / 2)).map((a, i) => string_to_number(hex.substr(i * 2, 2).replace(/^(?:0(?!$))*/u, ""), 16)).buffer;
 
 const code_to_list = code => {
-	const begin = Symbol();
-	const end = Symbol();
+	const [begin, end] = array(2).map(Symbol);
 	return list_unflatten(begin, end, list_concat([[begin], (async function*(){
 		code = await list_cache(strings_normalize(code));
 		let i;
@@ -409,8 +408,7 @@ const reflexion = (() => {
 	};
 	const reflexion = (wildcard, ref0 = node(methods.length), forked) => {
 		const path = pattern => list_map(async i => list_concat([[methods.indexOf(await (await i.next()).value)], i]), (async function*(){
-			const begin = Symbol();
-			const end = Symbol();
+			const [begin, end] = array(2).map(Symbol);
 			let matching;
 			for await(let a of list_flatten(begin, end, pattern)){
 				if(matching){
