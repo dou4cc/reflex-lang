@@ -440,9 +440,11 @@ const reflexion = (() => {
 			["on", "add"],
 			["off", "delete"],
 		].forEach(macros => reflexion[macros[0]] = fn(async (ref, wildcard, pattern, reflex) => ref[macros[1]](pattern_to_path(wildcard, pattern), reflex)));
-		const emit = async message => {
-			message = await list_cache(message);
-			await ref0.for_each(list_enum(message), fn_bind(call, reflexion0, message));
+		const define_emit = (reflexion, fn) => {
+			reflexion.emit = fn(async message => {
+				message = await list_cache(message);
+				await ref0.for_each(list_enum(message), async reflex => reflex(reflexion, await list_uncache(message)));
+			});
 		};
 		let closed;
 		const threads = [...loop(thread, 2)];
@@ -454,12 +456,12 @@ const reflexion = (() => {
 			await commit(ref, ...args);
 			return reflexion(ref);
 		})())))))());
-		reflexion0.emit = (...args) => {
+		define_emit(reflexion0, emit => (...args) => {
 			threads[0](() => threads[1](async () => {
 				assert_not_closed();
 				await emit(...args);
 			}));
-		};
+		});
 		reflexion0.close = async () => threads[0](() => threads[1](async () => {
 			const reflexion1 = () => {
 				const assert_not_used = () => {
@@ -474,12 +476,12 @@ const reflexion = (() => {
 					await commit(ref0, ...args);
 					return reflexion1();
 				}));
-				reflexion0.emit = (...args) => {
+				define_emit(reflexion0, emit => (...args) => {
 					threads0(async () => {
 						assert_not_used();
 						await emit(...args);
 					});
-				};
+				});
 				reflexion0.close = () => {};
 				return reflexion0;
 			};
