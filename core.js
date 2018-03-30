@@ -297,8 +297,8 @@ const list_normalize = async list => {
 const thunk = result => () => result;
 
 const reflexion = (() => {
-	const list_enum = (list0, exit0) => {
-		list0 = (async () => await is_list(list0) && list_cache(list0))();
+	const list_enum = (list, exit0) => {
+		const list0 = (async () => await is_list(list) && list_cache(list))();
 		return async index => methods[index] === "enter" && await list0 ? [async index => {
 			if(methods[index] === "exit") return [exit0];
 			const list = await list_uncache(await list0);
