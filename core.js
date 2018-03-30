@@ -2,7 +2,7 @@
 
 const equal = (a, b) => [a].includes(b);
 
-const call = async (...args) => args.pop()(...args);
+const call = async (...args) => (await args).pop()(...args);
 
 const throw_unsupported_error = () => {
 	throw TypeError("Unsupported");
@@ -396,7 +396,7 @@ const reflexion = (() => {
 			for_each: async (entry = placeholder, fn) => {
 				if(entry === placeholder){
 					if(values_count) await node0.for_each(entry, value => node1.has(value) && fn(value));
-					values[1].forEach(async value => fn(value));
+					values[1].forEach(async value => call(value, fn));
 					return;
 				}
 				await Promise.all(loop(async (index) => {
