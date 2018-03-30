@@ -45,13 +45,13 @@ const is_list = async a => await is_object(a) && Boolean(await catch_all(() => [
 	"asyncIterator",
 ].find(key => Symbol[key] in a) || "iterator"]]}));
 
-const list_uncache = async list => await is_list(list) ? (async function*(){
-	list = (async function*(list){
-		return yield* list;
-	})(list);
+const list_uncache = async list0 => await is_list(list0) ? (async function*(){
+	const list = (async function*(){
+		return yield* list0;
+	})();
 	let value;
 	while(!({value} = await list.next()).done) yield (async () => list_uncache(await value))();
-})() : list;
+})() : list0;
 
 const for_each = async (list, fn = () => {}) => {
 	list = await list_uncache(list);
