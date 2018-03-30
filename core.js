@@ -407,8 +407,8 @@ const reflexion = (() => {
 		};
 		return node1;
 	};
-	const reflexion = (wildcard, ref0 = node(methods.length), forked) => {
-		const path = pattern => list_map(async i => list_concat([[methods.indexOf(await (await i.next()).value)], i]), (async function*(){
+	const reflexion = (ref0 = node(methods.length), forked) => {
+		const pattern_to_path = (wildcard, pattern) => list_map(async i => list_concat([[methods.indexOf(await (await i.next()).value)], i]), (async function*(){
 			const [begin, end] = loop(Symbol);
 			let matching;
 			for await(let a of list_flatten(begin, end, pattern)){
@@ -439,7 +439,7 @@ const reflexion = (() => {
 		const define_commit = (reflexion, fn) => [
 			["on", "add"],
 			["off", "delete"],
-		].forEach(macros => reflexion[macros[0]] = fn(async (ref, pattern, reflex) => ref[macros[1]](path(pattern), reflex)));
+		].forEach(macros => reflexion[macros[0]] = fn(async (ref, wildcard, pattern, reflex) => ref[macros[1]](pattern_to_path(wildcard, pattern), reflex)));
 		const emit = async message => {
 			message = await list_cache(message);
 			await ref0.for_each(list_enum(message), fn_bind(call, reflexion0, message));
@@ -452,7 +452,7 @@ const reflexion = (() => {
 			forked = true;
 			const ref = node(methods.length, ref0);
 			await commit(ref, ...args);
-			return reflexion(wildcard, ref);
+			return reflexion(ref);
 		})())))))());
 		reflexion0.emit = (...args) => {
 			threads[0](() => threads[1](async () => {
@@ -485,7 +485,7 @@ const reflexion = (() => {
 			};
 			if(closed) return;
 			closed = true;
-			return forked ? reflexion(wildcard, ref0, forked) : reflexion1();
+			return forked ? reflexion(ref0, forked) : reflexion1();
 		}));
 		return reflexion0;
 	};
@@ -495,58 +495,12 @@ const reflexion = (() => {
 		"exit",
 		"next",
 	];
-	return wildcard => reflexion(wildcard);
+	const reflexion0 = reflexion();
+	Reflect.deleteProperty(reflexion0, "close");
+	return reflexion0;
 })();
 
 const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
-
-const reflexion = free => {
-	const check = () => children.size || reflexes.size || free && run(free);
-	const children = new Map;
-	const reflexes = new Set;
-	return {
-		emit: (...list) => {
-			const reflexes1 = Array.from(reflexes).reverse();
-			if(list.length) (children.get(list[0]) || {emit(){}}).emit(...list.slice(1));
-			reflexes1.forEach(f => reflexes.has(f) && f(...list));
-		},
-		on: (first, ...rest) => {
-			if(rest.length){
-				if(!children.has(first)) children.set(first, reflexion(() => {
-					children.delete(first);
-					check();
-				}));
-				return children.get(first).on(...rest);
-			}
-			const reflex = (...args) => run(() => first(...args));
-			reflexes.add(reflex);
-			return () => {
-				reflexes.delete(reflex);
-				check();
-			};
-		},
-	};
-};
-
-const path_map = free => {
-	const check = () => children.size || value === undefined && free && run(free);
-	let value;
-	const children = new Map;
-	return {
-		set: (first, ...rest) => {
-			if(rest.length){
-				if(!children.has(first)) children.set(first, path_map(() => {
-					children.delete(first);
-					check();
-				}));
-				return children.get(first).set(...rest);
-			}
-			value = first;
-			check();
-		},
-		get: (...path) => path.length ? (children.get(path.shift()) || {get(){}}).get(...path) : value,
-	};
-};
 
 const str2utf8 = string => new Uint8Array([].concat(...Array.from(string).map(a => {
 	const f = (a, i) => i ? f(a >> 6, i - 1).concat(0x80 | a & 0x3f) : [];
