@@ -119,24 +119,19 @@ const fn_cache = fn => {
 	};
 };
 
-const list_cache = (() => {
-	const lists = new WeakSet;
-	return async list0 => {
-		const next = () => fn_cache(async () => {
-			const {value, done} = await list0.next();
-			if(!done) return [next(), (async () => list_cache(await value))()];
-		});
-		if(!await is_list(list0) || lists.has(list0)) return list0;
-		list0 = await list_uncache(list0);
-		const entry = next();
-		const list = {async *[Symbol.asyncIterator](){
-			let i = entry;
-			while(i = await i()) yield ([i] = i)[1];
-		}};
-		lists.add(list);
-		return list;
-	};
-})();
+const list_cache = async list => {
+	const next = () => fn_cache(async () => {
+		const {value, done} = await list.next();
+		if(!done) return [next(), (async () => list_cache(await value))()];
+	});
+	if(!await is_list(list)) return list;
+	list = await list_uncache(list);
+	const entry = next();
+	return {async *[Symbol.asyncIterator](){
+		let i = entry;
+		while(i = await i()) yield ([i] = i)[1];
+	}};
+};
 
 const list_map = async function*(fn, list){
 	list = await list_uncache(list);
