@@ -98,7 +98,11 @@ const loop = function*(fn = i => i, count = Infinity){
 	for(let i = 0; i < count; i += 1) yield fn(i);
 };
 
-const lazy = thunk => ({then: resolve => resolve(thunk())});
+const lazy = thunk => {
+	let result;
+	const thread0 = thread();
+	return {then: resolve => resolve(thread0(() => result || (result = new Promise(resolve => resolve(thunk())))))};
+};
 
 const list_cache = async list => {
 	const next = () => lazy(async () => {
