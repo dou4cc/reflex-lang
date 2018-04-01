@@ -98,29 +98,10 @@ const loop = function*(fn = i => i, count = Infinity){
 	for(let i = 0; i < count; i += 1) yield fn(i);
 };
 
-const fn_cache = fn => {
-	const threads = [...loop(thread, 2)];
-	const results = new WeakMap;
-	let args0;
-	let result0;
-	return async (...args) => {
-		if(args.length === 1 && await is_object(...args)) return results.has(...args) ? results.get(...args) : threads[0](() => {
-			if(results.has(...args)) return results.get(...args);
-			const result = fn(...args);
-			results.set(...args, result);
-			return result;
-		});
-		const args1 = args0;
-		return args0 && await list_equal(args0, args) ? result0 : threads[1](async () => {
-			if(args0 !== args1 && await list_equal(args0, args)) return result0;
-			args0 = args;
-			return result0 = fn(...args);
-		});
-	};
-};
+const lazy = thunk => ({then: resolve => resolve(thunk())});
 
 const list_cache = async list => {
-	const next = () => fn_cache(async () => {
+	const next = () => lazy(async () => {
 		const {value, done} = await list.next();
 		if(!done) return [next(), (async () => list_cache(await value))()];
 	});
@@ -129,7 +110,7 @@ const list_cache = async list => {
 	const entry = next();
 	return {async *[Symbol.asyncIterator](){
 		let i = entry;
-		while(i = await i()) yield ([i] = i)[1];
+		while(i = await i) yield ([i] = i)[1];
 	}};
 };
 
