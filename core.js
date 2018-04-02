@@ -400,7 +400,13 @@ const reflexion = (() => {
 		"exit",
 		"next",
 	]}), forked) => {
-		const pattern_to_path = async function*(wildcard, pattern){
+		const assert_not_closed = () => {
+			if(closed) throw TypeError("Closed");
+		};
+		const define_commit = (reflexion, fn) => [
+			["on", "add"],
+			["off", "delete"],
+		].forEach(macros => reflexion[macros[0]] = fn(async (ref, wildcard, pattern, reflex) => ref[macros[1]]((async function*(){
 			const [begin, end] = loop(Symbol);
 			let matching;
 			for await(let a of list_flatten(begin, end, pattern)){
@@ -424,14 +430,7 @@ const reflexion = (() => {
 					]
 					: [["next", a]];
 			}
-		};
-		const assert_not_closed = () => {
-			if(closed) throw TypeError("Closed");
-		};
-		const define_commit = (reflexion, fn) => [
-			["on", "add"],
-			["off", "delete"],
-		].forEach(macros => reflexion[macros[0]] = fn(async (ref, wildcard, pattern, reflex) => ref[macros[1]](pattern_to_path(wildcard, pattern), reflex)));
+		})(), reflex)));
 		const define_emit = (reflexion, fn) => {
 			reflexion.emit = fn(async message => {
 				message = await list_cache(message);
