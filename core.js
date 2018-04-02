@@ -308,7 +308,9 @@ const reflexion = (() => {
 			}));
 		};
 		const placeholder = Symbol();
-		let {methods: [...methods], values_count = 0, children_count = 0} = node0;
+		let values_count;
+		let children_count;
+		const {methods: [...methods]} = {values_count = 0, children_count = 0} = node0;
 		if(!values_count && !children_count) node0 = null;
 		const values = [...loop(() => new Set, 2)];
 		const children = [Set, Map].map(struct => methods.map(() => new struct));
