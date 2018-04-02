@@ -99,13 +99,16 @@ const loop = function*(fn = i => i, count = Infinity){
 };
 
 const lazy = thunk => {
-	let result;
-	const thread0 = thread();
-	return {then: resolve => resolve(thread0(() => result || (result = new Promise(resolve => resolve(thunk())))))};
+	let resolve0;
+	const promise = new Promise(resolve => resolve0 = resolve);
+	return {then: resolve => {
+		resolve0({then: resolve => resolve(call(thunk))});
+		resolve(promise);
+	}};
 };
 
 const list_cache = async list => {
-	const next = () => lazy(async () => {
+	const next = fn_bind(lazy, async () => {
 		const {value, done} = await list.next();
 		if(!done) return [next(), (async () => list_cache(await value))()];
 	});
@@ -279,46 +282,50 @@ const thunk = result => () => result;
 const reflexion = (() => {
 	const list_enum = (list, exit0) => {
 		const list0 = (async () => await is_list(list) && list_cache(list))();
-		return async index => methods[index] === "enter" && await list0 ? [async index => {
-			if(methods[index] === "exit") return [exit0];
+		return async method => method === "enter" && await list0 ? [async method => {
+			if(method === "exit") return [exit0];
 			const list = await list_uncache(await list0);
 			const {value, done} = await list.next();
-			const exit = fn_bind((async () => (await list_enum(list, exit0)(methods.indexOf("enter")))[0])());
+			const exit = fn_bind((async () => (await list_enum(list, exit0)("enter"))[0])());
 			const [i = () => []] = [new Map([
 				["done", () => [exit, done]],
-				["enter", async () => list_enum(await value, exit)(methods.indexOf("enter"))],
+				["enter", async () => list_enum(await value, exit)("enter")],
 				["next", async () => [exit, done ? Symbol() : await value]],
-			]).get(methods[index])];
+			]).get(method)];
 			return i();
 		}] : [];
 	};
-	const node = (width, node0 = {values_count: 0, children_count: 0}, free = () => {}) => {
+	const node = (node0, free = () => {}) => {
 		const check = () => {
 			if(!node1.values_count && !node1.children_count) free();
 		};
-		const create_child = (index, key, child) => children[1][index].set(key, node(width, child, () => {
-			if(children_count) children[0][index].add(key);
-			children[1][index].delete(key);
-			check();
-		}));
+		const create_child = (method, key, child = {methods}) => {
+			const index = methods.indexOf(method);
+			children[1][index].set(key, node(child, () => {
+				if(children_count) children[0][index].add(key);
+				children[1][index].delete(key);
+				check();
+			}));
+		};
 		const placeholder = Symbol();
-		let {values_count, children_count} = node0;
+		let {methods: [...methods], values_count = 0, children_count = 0} = node0;
 		if(!values_count && !children_count) node0 = null;
 		const values = [...loop(() => new Set, 2)];
-		const children = [Set, Map].map(struct => [...loop(() => new struct, width)]);
+		const children = [Set, Map].map(struct => methods.map(() => new struct));
 		const node1 = {
+			methods,
 			values_count,
 			children_count,
-			child: (index, key) => {
+			child: (method, key) => {
+				const index = methods.indexOf(method);
 				if(!children[1][index].has(key)){
-					if(!children_count) return;
-					if(children[0][index].has(key)) return;
-					const child = node0.child(index, key);
+					if(!children_count || children[0][index].has(key)) return;
+					const child = node0.child(method, key);
 					if(!child){
 						children[0][index].add(key);
 						return;
 					}
-					create_child(index, key, child);
+					create_child(method, key, child);
 					children_count -= 1;
 					if(!children_count){
 						children[0].clear();
@@ -352,12 +359,12 @@ const reflexion = (() => {
 					node1.values_count += 1;
 					return;
 				}
-				const [index, key] = await list_to_array(await i);
-				if(!node1.child(index, key)){
-					create_child(index, key);
+				const [method, key] = await list_to_array(await i);
+				if(!node1.child(method, key)){
+					create_child(method, key);
 					node1.children_count += 1;
 				}
-				await node1.child(index, key).add(path, value);
+				await node1.child(method, key).add(path, value);
 			},
 			delete: async (path, value) => {
 				path = await list_uncache(path);
@@ -370,8 +377,8 @@ const reflexion = (() => {
 					check();
 					return;
 				}
-				const [index, key] = await list_to_array(await i);
-				if(node1.child(index, key)) await node1.child(index, key).delete(index, key);
+				const [method, key] = await list_to_array(await i);
+				if(node1.child(method, key)) await node1.child(method, key).delete(path, value);
 			},
 			for_each: async (entry = placeholder, fn) => {
 				if(entry === placeholder){
@@ -379,16 +386,21 @@ const reflexion = (() => {
 					values[1].forEach(async value => call(value, fn));
 					return;
 				}
-				await Promise.all(loop(async (index) => {
-					const [next, key] = await entry(index);
-					if(node1.child(index, key)) await node1.child(index, key).for_each(next, fn);
-				}, width));
+				await Promise.all(methods.map(async method => {
+					const [next, key] = await entry(method);
+					if(node1.child(method, key)) await node1.child(method, key).for_each(next, fn);
+				}));
 			},
 		};
 		return node1;
 	};
-	const reflexion = (ref0 = node(methods.length), forked) => {
-		const pattern_to_path = (wildcard, pattern) => list_map(async i => list_concat([[methods.indexOf(await (await i.next()).value)], i]), (async function*(){
+	const reflexion = (ref0 = node({methods: [
+		"done",
+		"enter",
+		"exit",
+		"next",
+	]}), forked) => {
+		const pattern_to_path = async function*(wildcard, pattern){
 			const [begin, end] = loop(Symbol);
 			let matching;
 			for await(let a of list_flatten(begin, end, pattern)){
@@ -412,7 +424,7 @@ const reflexion = (() => {
 					]
 					: [["next", a]];
 			}
-		})());
+		};
 		const assert_not_closed = () => {
 			if(closed) throw TypeError("Closed");
 		};
@@ -432,7 +444,7 @@ const reflexion = (() => {
 		define_commit(reflexion0, commit => async (...args) => (await threads[0](() => thunk(threads[1](thunk((async () => {
 			assert_not_closed();
 			forked = true;
-			const ref = node(methods.length, ref0);
+			const ref = node(ref0);
 			await commit(ref, ...args);
 			return reflexion(ref);
 		})())))))());
@@ -471,12 +483,6 @@ const reflexion = (() => {
 		}));
 		return reflexion0;
 	};
-	const methods = [
-		"done",
-		"enter",
-		"exit",
-		"next",
-	];
 	const reflexion0 = reflexion();
 	Reflect.deleteProperty(reflexion0, "close");
 	return reflexion0;
