@@ -70,7 +70,7 @@ const list_to_array = async list => {
 	return Promise.all(array);
 };
 
-const fn_bind = (fn, ...args0) => async (...args1) => (await fn)(...args0, ...args1);
+const fn_bind = (fn, ...args0) => async (...args1) => fn(...args0, ...args1);
 
 const promise = () => {
 	let resolve;
@@ -95,27 +95,27 @@ const thread = () => {
 };
 
 const thread = (free = () => {}) => {
-	const thread = (function*(){
-		while(true) (yield)();
-	})();
-	let promise0 = Promise.resolve();
-	const append = task => {
+	const append = (checking, task) => {
 		const [promise1, resolve] = promise();
-		thread.next(() => {
+		queue.next(() => {
 			const promise = promise0 = promise0.then(async () => {
 				resolve(call(task));
 				try{
 					await promise1;
 				}catch(error){}
-				thread.next(() => promise0 === promise && (async () => {
-					const {done} = await free().next();
-					
-				})());
+				if(!checking && promise0 === promise) call(free => append(true, async () => {
+					queue.next(() => {
+					});
+				}), free);
 			});
 		});
 		return promise1;
 	};
-	return append;
+	const queue = (function*(){
+		while(true) (yield)();
+	})();
+	let promise0 = Promise.resolve();
+	return fn_bind(append, false);
 };
 
 const [list_any, list_exist] = [true, false].map(macro => async (fn, list) => {
