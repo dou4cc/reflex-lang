@@ -79,15 +79,43 @@ const promise = () => {
 
 const thread = () => {
 	const thread = (async function*(){
-		let fn = yield;
-		while(true) fn = yield await fn();
+		while(true) await (yield)();
 	})();
 	thread.next();
 	return async task => {
 		const [promise0, resolve] = promise();
-		await thread.next(() => resolve(call(task)));
+		await thread.next(async () => {
+			resolve(call(task));
+			try{
+				await promise0;
+			}catch(error){}
+		});
 		return promise0;
 	};
+};
+
+const thread = (free = () => {}) => {
+	const thread = (function*(){
+		while(true) (yield)();
+	})();
+	let promise0 = Promise.resolve();
+	const append = task => {
+		const [promise1, resolve] = promise();
+		thread.next(() => {
+			const promise = promise0 = promise0.then(async () => {
+				resolve(call(task));
+				try{
+					await promise1;
+				}catch(error){}
+				thread.next(() => promise0 === promise && (async () => {
+					const {done} = await free().next();
+					
+				})());
+			});
+		});
+		return promise1;
+	};
+	return append;
 };
 
 const [list_any, list_exist] = [true, false].map(macro => async (fn, list) => {
@@ -155,9 +183,9 @@ const list_unflatten = async function*(begin, end, list){
 			yield a;
 			continue;
 		}
-		const slice = await list_cache(list_unflatten(begin, end, list_concat([[begin], list])));
-		yield list_uncache(slice);
-		await for_each(slice);
+		const list1 = await list_cache(list_unflatten(begin, end, list_concat([[begin], list])));
+		yield list_uncache(list1);
+		await for_each(list1);
 	}
 	throw_syntax_error();
 };
@@ -222,7 +250,6 @@ const code_to_list = code => {
 		let i;
 		while(i = await strings_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|[^[#`\s\]]+(?=[[#`\s\]])/gu, code)){
 			const [, token] = [code] = i;
-			code = await list_cache(code);
 			if(!/^#/u.test(token)) yield (async () =>
 				token === "[" ? begin
 				: token === "]" ? end
@@ -239,6 +266,7 @@ const code_to_list = code => {
 				: /^\$\d/u.test(token) ? "$".repeat(string_to_number(token.slice(1)))
 				: token
 			)();
+			code = await list_cache(code);
 		}
 		if(!/^\s*$/u.test(await string_concat(code))) throw_syntax_error();
 	})(), [end]]));
@@ -309,12 +337,12 @@ const reflexion = (() => {
 			const list = await list_uncache(await list0);
 			const {value, done} = await list.next();
 			const exit = fn_bind((async () => (await list_enum(list, exit0)("enter"))[0])());
-			const [i = () => []] = [new Map([
-				["done", () => [exit, done]],
-				["enter", async () => list_enum(await value, exit)("enter")],
-				["next", async () => [exit, done ? Symbol() : await value]],
-			]).get(method)];
-			return i();
+			switch(method){
+			case "done": return [exit, done];
+			case "enter": return list_enum(await value, exit)("enter");
+			case "next": return [exit, done ? Symbol() : await value];
+			}
+			return [];
 		}] : [];
 	};
 	const node = (node0, free = () => {}) => {
@@ -330,7 +358,7 @@ const reflexion = (() => {
 			}));
 		};
 		const placeholder = Symbol();
-		const {methods: [...methods]} = node0;
+		const {methods} = node0;
 		let {values_count = 0, children_count = 0} = node0;
 		if(!values_count && !children_count) node0 = null;
 		const values = [...loop(() => new Set, 2)];
@@ -457,7 +485,7 @@ const reflexion = (() => {
 		const define_emit = (reflexion, fn) => {
 			reflexion.emit = fn(async message => {
 				message = await list_cache(message);
-				await ref0.for_each(list_enum(message), async reflex => reflex(reflexion, await list_uncache(message)));
+				return thunk(ref0.for_each(list_enum(message), async reflex => reflex(reflexion, await list_uncache(message))));
 			});
 		};
 		let closed;
@@ -472,10 +500,10 @@ const reflexion = (() => {
 			await commit(ref, ...args);
 			return reflexion(ref);
 		});
-		define_emit(reflexion0, emit => (...args) => await lock0(async function*(){
+		define_emit(reflexion0, emit => async (...args) => (await lock0(async function*(){
 			assert_not_closed();
-			await emit(...args);
-		}));
+			return await emit(...args);
+		}))());
 		reflexion0.close = fn_bind(lock0, async function*(){
 			const reflexion1 = () => {
 				const assert_not_used = () => {
@@ -493,10 +521,10 @@ const reflexion = (() => {
 					await commit(ref0, ...args);
 					return reflexion1();
 				});
-				define_emit(reflexion0, emit => (...args) => lock0(async function*(){
+				define_emit(reflexion0, emit => async (...args) => (await lock0(async function*(){
 					assert_not_used();
-					await emit(...args);
-				}));
+					return await emit(...args);
+				}))());
 				reflexion0.close = () => {};
 				return reflexion0;
 			};
