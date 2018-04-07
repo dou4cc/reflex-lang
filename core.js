@@ -145,6 +145,10 @@ const list_fn = fn => (...args) => {
 	return list0;
 };
 
+const list_clone = list_fn(async (append, list) => {
+	for await(let a of list) await append(a);
+});
+
 const [list_any, list_exist] = [true, false].map(macro => async (fn, list) => {
 	for await(let a of await list_uncache(list)) if(macro ^ Boolean(await fn(a))) return !macro;
 	return macro;
