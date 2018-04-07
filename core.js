@@ -97,7 +97,52 @@ const thread = (free = () => {}) => {
 	};
 };
 
+const lazy = thunk => {
+	const [promise0, resolve0] = promise();
+	return {then: resolve => {
+		resolve0({then: resolve => resolve(thunk())});
+		resolve(promise0);
+	}};
+};
+
+const thunk = result => () => result;
+
 const list = () => {
+	const key = Symbol.asyncIterator;
+	const thread0 = thread();
+	let resolve0;
+	const entry = thunk(([, resolve0] = promise())[0]);
+	return [
+		{[key]: () => {
+			const thread0 = thread();
+			let i = entry;
+			const iter = {
+				[key]: () => iter,
+				next: () => thread0(async () => {
+					i = await (await i)();
+					return i ? {done: false, value: ([i] = i)[1]} : {done: true};
+				}),
+			};
+			return iter;
+		}},
+		async value => {
+			const [promise0, resolve] = promise();
+			await thread0(() => {
+				const resolve1 = resolve0;
+				const i = [([, resolve0] = promise())[0], value];
+				resolve1(thunk(lazy({then: resolve1 => resolve(resolve1(i)))));
+			});
+			return promise0;
+		},
+		() => thread0(() => resolve0(thunk())),
+		error => thread0(() => resolve0(Promise.reject(error))),
+	];
+};
+
+const list_fn = fn => (...args) => {
+	const [list0, append, close, abort] = list();
+	call(append, ...args, fn).then(() => close(), abort);
+	return list0;
 };
 
 const [list_any, list_exist] = [true, false].map(macro => async (fn, list) => {
@@ -115,14 +160,6 @@ const list_equal = async (a, b) => {
 
 const loop = function*(fn = i => i, count = Infinity){
 	for(let i = 0; i < count; i += 1) yield fn(i);
-};
-
-const lazy = thunk => {
-	const [promise0, resolve0] = promise();
-	return {then: resolve => {
-		resolve0({then: resolve => resolve(thunk())});
-		resolve(promise0);
-	}};
 };
 
 const list_cache = async list => {
@@ -294,8 +331,6 @@ const list_normalize = async list => {
 	if(is_number(list)) return buffer_to_binary(number_to_uint(list));
 	return list;
 };
-
-const thunk = result => () => result;
 
 const lock = () => {
 	const threads = [...loop(thread, 2)];
