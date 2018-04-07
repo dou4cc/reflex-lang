@@ -77,25 +77,12 @@ const promise = () => {
 	return [new Promise(resolve1 => resolve = resolve1), resolve];
 };
 
-const thread = () => {
-	const thread = (async function*(){
-		while(true) await (yield)();
-	})();
-	thread.next();
-	return async task => {
-		const [promise0, resolve] = promise();
-		await thread.next(async () => {
-			resolve(call(task));
-			try{
-				await promise0;
-			}catch(error){}
-		});
-		return promise0;
-	};
-};
-
 const thread = (free = () => {}) => {
-	const append = (checking, task) => {
+	const queue = (function*(){
+		while(true) (yield)();
+	})();
+	let promise0 = Promise.resolve();
+	return task => {
 		const [promise1, resolve] = promise();
 		queue.next(() => {
 			const promise = promise0 = promise0.then(async () => {
@@ -103,19 +90,14 @@ const thread = (free = () => {}) => {
 				try{
 					await promise1;
 				}catch(error){}
-				if(!checking && promise0 === promise) call(free => append(true, async () => {
-					queue.next(() => {
-					});
-				}), free);
+				call(() => promise0 === promise, free);
 			});
 		});
 		return promise1;
 	};
-	const queue = (function*(){
-		while(true) (yield)();
-	})();
-	let promise0 = Promise.resolve();
-	return fn_bind(append, false);
+};
+
+const list = () => {
 };
 
 const [list_any, list_exist] = [true, false].map(macro => async (fn, list) => {
