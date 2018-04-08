@@ -251,7 +251,7 @@ const code_to_list = code => {
 					["t", "\t"],
 				]).get($[2]))
 				.replace(/(^|[^\\])\\(\[.*?(?:\]|$))/gu, (...$) => {
-					if(/^\[[a-f]*\]$/iu.test($[2])) return $[1] + String.fromCodePoint(Number.parseInt($[2], 16));
+					if(/^\[[0-9a-f]*\]$/iu.test($[2])) return $[1] + String.fromCodePoint(Number.parseInt("0" + $[2], 16));
 					throw_syntax_error();
 				})
 				.replace(/\\(\\+[nrt[]|\\*`)/gu, "$1");
@@ -294,9 +294,9 @@ const is_buffer = a => {
 
 const buffer_to_binary = buffer => [...new Uint8Array(buffer)].map(a => String.fromCodePoint(a)).join("");
 
-const is_string = a => String(a) === a;
+const is_string = a => typeof a === "string";
 
-const is_number = a => equal(Number(a), a);
+const is_number = a => typeof a === "number";
 
 const list_normalize = async list => {
 	if(await is_list(list)) return list_map(list_normalize, list);
