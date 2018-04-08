@@ -43,7 +43,11 @@ const is_object = a => Object(a) === a;
 
 const is_list = async a => is_object(a) && Boolean(await catch_all(() => [
 	"asyncIterator",
-].find(key => Symbol[key] in a) || "iterator"]]}));
+	"iterator",
+].some(key => {
+	const iter = a[Symbol[key]];
+	return iter != null && is_object(iter());
+})));
 
 const fn_bind = (fn, ...args0) => (...args1) => fn(...args0, ...args1);
 
