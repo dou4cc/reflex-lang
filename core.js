@@ -142,7 +142,7 @@ const list_to_array = async list => {
 	return Promise.all(array);
 };
 
-const list_destruct = async list => {
+const list_destructure = async list => {
 	for await(let first of list) return [first, list_fn(async append => {
 		for await(let a of list) await append(a);
 	})()];
@@ -167,7 +167,7 @@ const list_flatten = list_fn(async (append, begin, end, list) => {
 });
 
 const list_unflatten = list_fn(async (append, begin, end, list) => {
-	if(equal(await ([, list] = await list_destruct(list))[0], begin)) for await(let a of list){
+	if(equal(await ([, list] = await list_destructure(list))[0], begin)) for await(let a of list){
 		a = await a;
 		if(equal(a, end)) return;
 		if(!equal(a, begin)){
@@ -186,7 +186,7 @@ const strings_match = async (regex, strings) => {
 	let string = "";
 	let $;
 	while(!($ = regex.exec(string))){
-		const [first] = [, strings] = await list_destruct(strings);
+		const [first] = [, strings] = await list_destructure(strings);
 		if(!strings) return;
 		string += await first;
 	}
