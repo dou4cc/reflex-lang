@@ -1,3 +1,5 @@
+//ES2018
+
 "use strict";
 
 const equal = (a, b) => [a].includes(b);
@@ -129,10 +131,6 @@ const list_fn = fn => (...args) => {
 	return list0;
 };
 
-const list_clone = list_fn(async (append, list) => {
-	for await(let a of list) await append(a);
-});
-
 const list_concat = list_fn(async (append, lists) => {
 	for await(let list of lists) for await(let a of await list) await append(a);
 });
@@ -160,6 +158,8 @@ const list_map = list_fn(async (append, fn, list) => {
 });
 
 const list_flat_map = async (fn, list) => await is_list(list) ? list_map(fn_bind(list_flat_map, fn), list) : fn(list);
+
+const list_clone = fn_bind(list_flat_map, a => a);
 
 const list_flatten = list_fn(async (append, begin, end, list) => {
 	if(!await is_list(list)) return append(list);
@@ -308,22 +308,20 @@ const list_normalize = async list => {
 
 const thunk = result => () => result;
 
-const lock = () => {
-	const threads = [...loop(thread, 2)];
-	return async fn => (await (await threads[0](() => thunk(threads[1](thunk((async () => {
-		const {value, done} = await fn().next();
-		return thunk(done ? await value : threads[0](() => threads[1](async () => {
-			const [promise0, resolve] = promise();
-			await for_each((async function*(){
-				resolve(yield* fn());
-			})());
-			return promise0;
-		})));
-	})())))))())();
-};
-
-const lock = () => {
-	const threads = [...loop(() => thread(), 2)];
+const lock = free => {
+	const thread0 = thread(free);
+	const [thread1, thread2] = loop(() => thread());
+	return (mode, fn) => {
+		const [async0, ...returns] = async();
+		thread0(thunk((async () => {
+			switch(mode){
+			case "readonly": return (await thread1(() => thunk(thread2(thunk(call(fn))))))();
+			case "readwrite": return thread1(() => thread2(fn));
+			}
+			throw_unsupported_error();
+		})().then(...returns)));
+		return async0;
+	};
 };
 
 const reflexion = (() => {
@@ -454,29 +452,31 @@ const reflexion = (() => {
 		const define_commit = (reflexion, fn) => [
 			["on", "add"],
 			["off", "delete"],
-		].forEach(macros => reflexion[macros[0]] = fn(async (ref, wildcard, pattern, reflex) => ref[macros[1]]((async function*(){
+		].forEach(macros => reflexion[macros[0]] = fn(async (ref, wildcard, pattern, reflex) => ref[macros[1]](list_fn(async append => {
 			const [begin, end] = loop(Symbol);
 			let matching;
 			for await(let a of list_flatten(begin, end, pattern)){
+				a = await a;
 				if(matching){
 					matching = false;
 					if(a === end){
-						yield ["exit"];
+						await append(["exit"]);
 						continue;
 					}
-					yield ["done", false];
+					await append(["done", false]);
 				}
 				if(equal(a, wildcard)){
 					matching = true;
 					continue;
 				}
-				yield*
+				for(let i of
 					a === begin ? [["enter"]]
 					: a === end ? [
 						["done", true],
 						["exit"],
 					]
-					: [["next", a]];
+					: [["next", a]]
+				) await append(i);
 			}
 		})(), reflex)));
 		const define_emit = (reflexion, fn) => {
@@ -489,7 +489,7 @@ const reflexion = (() => {
 		const lock0 = lock();
 		const reflexion0 = {};
 		define_commit(reflexion0, commit => async (...args) => {
-			await lock0(async function*(){
+			await lock0("readonly", () => {
 				assert_not_closed();
 				forked = true;
 			});
