@@ -58,22 +58,29 @@ const async = () => {
 	return [new Promise((...returns) => returns = returns1), ...returns];
 };
 
-const thread = (free = () => {}) => {
-	const queue = (function*(){
-		while(true) (yield)();
-	})();
-	let async0;
-	return task => {
-		const [async1, ...returns] = async();
-		queue.next(() => {
-			const async = async0 = (async () => {
-				await async0;
-				await call(task).then(...returns);
-				call(() => async0 === async, free);
-			})();
-		});
-		return async1;
+const scheduler = (free = () => {}) => {
+	let counter = 0;
+	return async task => {
+		const [async0, ...returns] = async();
+		counter += 1;
+		await call(task).then(...returns);
+		counter -= 1;
+		call(() => !counter, free);
+		return async0;
 	};
+};
+
+const thread = free => {
+	const scheduler0 = scheduler(free);
+	const queue = (async function*(){
+		while(true) await (yield)();
+	})();
+	queue.next();
+	return task => scheduler0(async () => {
+		const [async0, ...returns] = async();
+		await queue.next(() => call(task).then(...returns));
+		return async0;
+	});
 };
 
 const lazy = thunk => {
