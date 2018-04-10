@@ -75,8 +75,8 @@ const thread = free => {
 	const queue = (async function*(){
 		while(true) await (yield)();
 	})();
-	queue.next();
 	return task => scheduler0(async () => {
+		await queue.next(() => {});
 		const [async0, ...returns] = async();
 		await queue.next(() => call(task).then(...returns));
 		return async0;
@@ -316,19 +316,15 @@ const list_normalize = async list => {
 const thunk = result => () => result;
 
 const lock = free => {
-	const thread0 = thread(free);
-	const [thread1, thread2] = loop(() => thread());
-	return (mode, fn) => {
-		const [async0, ...returns] = async();
-		thread0(thunk((async () => {
-			switch(mode){
-			case "readonly": return (await thread1(() => thunk(thread2(thunk(call(fn))))))();
-			case "readwrite": return thread1(() => thread2(fn));
-			}
-			throw_unsupported_error();
-		})().then(...returns)));
-		return async0;
-	};
+	const scheduler0 = scheduler(free);
+	const [thread0, thread1] = loop(() => thread());
+	return (mode, fn) => scheduler0(async () => {
+		switch(mode){
+		case "readonly": return (await thread0(() => thunk(thread1(thunk(call(fn))))))();
+		case "readwrite": return thread0(() => thread1(fn));
+		}
+		throw_unsupported_error();
+	});
 };
 
 const reflexion = (() => {
