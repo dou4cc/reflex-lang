@@ -4,7 +4,9 @@
 
 const equal = (a, b) => [a].includes(b);
 
-const call = async (...args) => (await args).pop()(...args);
+const call = async (...args) => args.pop()(...args);
+
+const defer = async (fn, ...args) => (await fn)(...args);
 
 const throw_unsupported_error = () => {
 	throw TypeError("Unsupported");
@@ -59,29 +61,42 @@ const async = () => {
 };
 
 const scheduler = (free = () => {}) => {
-	let counter = 0;
+	let count = 0;
 	return async task => {
 		const [async0, ...returns] = async();
-		counter += 1;
-		await call(task).then(...returns);
-		counter -= 1;
-		call(() => !counter, free);
+		const async1 = call(task).then(...returns);
+		count += 1;
+		await async1;
+		count -= 1;
+		defer(free, () => !count);
 		return async0;
 	};
 };
 
-const thread = free => {
-	const scheduler0 = scheduler(free);
+const once = value => {
+	const queue = (function*(){
+		yield value;
+	})();
+	return () => {
+		const {done, value} = queue.next();
+		if(!done) return value;
+	};
+};
+
+const thread = () => {
 	const queue = (async function*(){
 		while(true) await (yield)();
 	})();
-	return task => scheduler0(async () => {
-		await queue.next(() => {});
+	const init = once(queue.next());
+	return async task => {
+		await init();
 		const [async0, ...returns] = async();
 		await queue.next(() => call(task).then(...returns));
 		return async0;
-	});
+	};
 };
+
+const thunk = value => () => value;
 
 const lazy = thunk => {
 	const [async0, resolve] = async();
@@ -117,12 +132,16 @@ const list = () => {
 	});
 	return [{[key]: () => {
 		const thread0 = thread();
-		let i = entry;
+		let cursor = entry;
 		const iter = {
 			[key]: () => iter,
 			next: () => thread0(async () => {
-				i = await i();
-				return i ? {done: false, value: ([i] = i)[1]} : {done: true};
+				if(cursor){
+					const cursor1 = cursor;
+					cursor = null;
+					cursor = await cursor1();
+				}
+				return cursor ? {done: false, value: ([cursor] = cursor)[1]} : {done: true};
 			}),
 		};
 		return iter;
@@ -200,9 +219,8 @@ const strings_match = async (regex, strings) => {
 	return [list_concat([[string.slice(regex.lastIndex)], strings]), ...$];
 };
 
-const strings_match_all = list_fn(async (append, regex, strings) => {
-	let i;
-	while(i = await strings_match(regex, strings)) await append(([strings] = i).slice(1));
+const strings_match_all = list_fn(async (append, regex, cursor) => {
+	while(cursor = await strings_match(regex, cursor)) await append(([cursor] = cursor).slice(1));
 });
 
 const strings_normalize = list_fn(async (append, strings) => {
@@ -240,14 +258,13 @@ const string_to_number = (a, radix = 10) => {
 
 const hex_to_buffer = hex => new Uint8Array(Array(hex.length / 2)).map((a, i) => string_to_number(hex.substr(i * 2, 2).replace(/^(?:0(?!$))*/u, ""), 16)).buffer;
 
-const code_to_list = code => {
+const code_to_list = cursor => {
 	const [begin, end] = loop(Symbol);
 	return list_unflatten(begin, end, list_concat([[begin], list_fn(async append => {
-		code = strings_normalize(code);
-		let i;
-		while(i = await strings_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|[^[#`\s\]]+(?=[[#`\s\]])/gu, code)){
-			const [, token] = [code] = i;
-			if(!/^#/u.test(token)) await append(call(() => {
+		cursor = strings_normalize(cursor);
+		while(cursor = await strings_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|[^[#`\s\]]+(?=[[#`\s\]])/gu, cursor)){
+			const [, token] = [cursor] = cursor;
+			if(!/^#/u.test(token)) await append(defer(() => {
 				if(token === "[") return begin;
 				if(token === "]") return end;
 				if(/^`/u.test(token)) return token
@@ -268,7 +285,7 @@ const code_to_list = code => {
 				return token;
 			}));
 		}
-		if(!/^\s*$/u.test(await string_concat(code))) throw_syntax_error();
+		if(!/^\s*$/u.test(await string_concat(cursor))) throw_syntax_error();
 	})(), [end]]));
 };
 
@@ -313,32 +330,47 @@ const list_normalize = async list => {
 	return list;
 };
 
-const thunk = result => () => result;
-
-const lock = free => {
-	const scheduler0 = scheduler(free);
-	const [thread0, thread1] = loop(() => thread());
-	return (mode, fn) => scheduler0(async () => {
+const lock = () => {
+	const [thread0, thread1] = loop(thread);
+	return async (mode, fn) => {
 		switch(mode){
 		case "readonly": return (await thread0(() => thunk(thread1(thunk(call(fn))))))();
 		case "readwrite": return thread0(() => thread1(fn));
 		}
 		throw_unsupported_error();
+	};
+};
+
+const [hang] = async();
+
+const atom = async ([...modes], index0, fn) => {
+	index0 = Math.min(modes.length - 1, Math.floor(index0));
+	const [async0, ...returns] = async();
+	await modes[index0](async () => {
+		const [async0, resolve] = async();
+		call(async index => {
+			if(index >= index0) return;
+			const async = atom(modes, index, fn).then(...returns);
+			resolve();
+			await async;
+			await hang;
+		}, fn).then(...returns).then(resolve);
+		return async0;
 	});
+	return async0;
 };
 
 const reflexion = (() => {
 	const list_enum = (list, exit0) => {
-		const list0 = (async () => await is_list(list) && list_cache(list))();
+		const list0 = (async () => await is_list(list) && list_clone(list))();
 		return async method => method === "enter" && await list0 ? [async method => {
 			if(method === "exit") return [exit0];
-			const list = await list_uncache(await list0);
-			const {value, done} = await list.next();
-			const exit = fn_bind((async () => (await list_enum(list, exit0)("enter"))[0])());
+			const [first, rest] = await list_destructre(await list0);
+			const exit = fn_bind(defer, (async () => (await list_enum(rest, exit0)("enter"))[0])());
 			switch(method){
-			case "done": return [exit, done];
-			case "enter": return list_enum(await value, exit)("enter");
-			case "next": return [exit, done ? Symbol() : await value];
+			case "done": return [exit, !rest];
+			case "enter": return list_enum(await first, exit)("enter");
+			case "next": return [exit, rest ? await first : Symbol()];
 			}
 			return [];
 		}] : [];
@@ -472,20 +504,20 @@ const reflexion = (() => {
 					matching = true;
 					continue;
 				}
-				for(let i of
+				for(let branch of
 					a === begin ? [["enter"]]
 					: a === end ? [
 						["done", true],
 						["exit"],
 					]
 					: [["next", a]]
-				) await append(i);
+				) await append(branch);
 			}
 		})(), reflex)));
 		const define_emit = (reflexion, fn) => {
-			reflexion.emit = fn(async message => {
-				message = await list_cache(message);
-				return thunk(ref0.for_each(list_enum(message), async reflex => reflex(reflexion, await list_uncache(message))));
+			reflexion.emit = fn(async (resolve, message) => {
+				message = await list_clone(message);
+				resolve(ref0.for_each(list_enum(message), fn_bind(call, reflexion, message)));
 			});
 		};
 		let closed;
@@ -500,11 +532,15 @@ const reflexion = (() => {
 			await commit(ref, ...args);
 			return reflexion(ref);
 		});
-		define_emit(reflexion0, emit => async (...args) => (await lock0(async function*(){
-			assert_not_closed();
-			return await emit(...args);
-		}))());
-		reflexion0.close = fn_bind(lock0, async function*(){
+		define_emit(reflexion0, emit => async (...args) => {
+			const [async0, resolve] = async();
+			await lock0("readonly", async () => {
+				assert_not_closed();
+				await emit(resolve, ...args);
+			});
+			return async0;
+		});
+		reflexion0.close = fn_bind(lock0, "readwrite", async () => {
 			const reflexion1 = () => {
 				const assert_not_used = () => {
 					if(used) assert_not_closed();
@@ -513,23 +549,25 @@ const reflexion = (() => {
 				const lock0 = lock();
 				const reflexion0 = {};
 				define_commit(reflexion0, commit => async (...args) => {
-					await lock0(async function*(){
+					await lock0("readwrite", async () => {
 						assert_not_used();
-						yield;
 						used = true;
 					});
 					await commit(ref0, ...args);
 					return reflexion1();
 				});
-				define_emit(reflexion0, emit => async (...args) => (await lock0(async function*(){
-					assert_not_used();
-					return await emit(...args);
-				}))());
+				define_emit(reflexion0, emit => async (...args) => {
+					const [async0, resolve] = async();
+					await lock0("readonly", async () => {
+						assert_not_used();
+						await emit(resolve, ...args);
+					});
+					return async0;
+				});
 				reflexion0.close = () => {};
 				return reflexion0;
 			};
 			if(closed) return;
-			yield;
 			closed = true;
 			return forked ? reflexion(ref0, forked) : reflexion1();
 		});
