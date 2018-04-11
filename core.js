@@ -4,9 +4,11 @@
 
 const equal = (a, b) => [a].includes(b);
 
-const call = async (...args) => args.pop()(...args);
+const call = async (fn, ...args) => fn(...args);
 
 const defer = async (fn, ...args) => (await fn)(...args);
+
+const fn_bind = (fn, ...args0) => (...args1) => fn(...args0, ...args1);
 
 const throw_unsupported_error = () => {
 	throw TypeError("Unsupported");
@@ -35,9 +37,9 @@ const throw_syntax_error = () => {
 	throw SyntaxError("Unexpected token");
 };
 
-const catch_all = async fn => {
+const catch_all = async (fn, ...args) => {
 	try{
-		return fn();
+		return fn(...args);
 	}catch(error){
 		(await throw_call_stack_error)(error);
 	}
@@ -53,7 +55,18 @@ const is_list = async a => is_object(a) && Boolean(await catch_all(() => [
 	return iter != null && is_object(iter());
 })));
 
-const fn_bind = (fn, ...args0) => (...args1) => fn(...args0, ...args1);
+const is_string = a => typeof a === "string";
+
+const is_number = a => typeof a === "number";
+
+const is_buffer = a => {
+	try{
+		Reflect.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get.call(a);
+		return new Uint8Array(a).buffer;
+	}catch(error){
+		if(!(error instanceof TypeError)) throw error;
+	}
+};
 
 const async = () => {
 	let returns;
@@ -62,9 +75,9 @@ const async = () => {
 
 const scheduler = (free = () => {}) => {
 	let count = 0;
-	return async task => {
+	return async (...args) => {
 		const [async0, ...returns] = async();
-		const async1 = call(task).then(...returns);
+		const async1 = call(...args).then(...returns);
 		count += 1;
 		await async1;
 		count -= 1;
@@ -88,10 +101,10 @@ const thread = () => {
 		while(true) await (yield)();
 	})();
 	const init = once(queue.next());
-	return async task => {
+	return async (...args) => {
 		await init();
 		const [async0, ...returns] = async();
-		await queue.next(() => call(task).then(...returns));
+		await queue.next(() => call(...args).then(...returns));
 		return async0;
 	};
 };
@@ -148,16 +161,16 @@ const list = () => {
 	}}, returns];
 };
 
-const list_fn = fn => (...args) => {
+const fn_to_list = (fn, ...args) => {
 	const [list0, returns0] = list();
 	(async () => {
 		const [append, ...returns] = await returns0;
-		await call(append, ...args).then(...returns);
+		await call(fn, append, ...args).then(...returns);
 	})();
 	return list0;
 };
 
-const list_concat = list_fn(async (append, lists) => {
+const list_concat = fn_bind(fn_to_list, async (append, lists) => {
 	for await(let list of lists) for await(let a of await list) await append(a);
 });
 
@@ -169,17 +182,17 @@ const list_to_array = async list => {
 };
 
 const list_destructure = async list => {
-	for await(let first of list) return [first, list_fn(async append => {
+	for await(let first of list) return [first, fn_to_list(async append => {
 		for await(let a of list) await append(a);
-	})()];
+	})];
 	return [];
 };
 
-const loop = function*(fn = i => i, count = Infinity){
-	for(let i = 0; i < count; i += 1) yield fn(i);
+const loop = function*(fn = i => i){
+	for(let i = 0; ; i += 1) yield fn(i);
 };
 
-const list_map = list_fn(async (append, fn, list) => {
+const list_map = fn_bind(fn_to_list, async (append, fn, list) => {
 	for await(let a of list) await append((async () => fn(await a))());
 });
 
@@ -187,12 +200,12 @@ const list_flat_map = async (fn, list) => await is_list(list) ? list_map(fn_bind
 
 const list_clone = fn_bind(list_flat_map, a => a);
 
-const list_flatten = list_fn(async (append, begin, end, list) => {
+const list_flatten = fn_bind(fn_to_list, async (append, begin, end, list) => {
 	if(!await is_list(list)) return append(list);
 	for await(let a of list_concat([[begin], list_concat(list_map(fn_bind(list_flatten, begin, end), list)), [end]])) await append(a);
 });
 
-const list_unflatten = list_fn(async (append, begin, end, list) => {
+const list_unflatten = fn_bind(fn_to_list, async (append, begin, end, list) => {
 	if(equal(await ([, list] = await list_destructure(list))[0], begin)) for await(let a of list){
 		a = await a;
 		if(equal(a, end)) return;
@@ -219,11 +232,11 @@ const strings_match = async (regex, strings) => {
 	return [list_concat([[string.slice(regex.lastIndex)], strings]), ...$];
 };
 
-const strings_match_all = list_fn(async (append, regex, cursor) => {
+const strings_match_all = fn_bind(fn_to_list, async (append, regex, cursor) => {
 	while(cursor = await strings_match(regex, cursor)) await append(([cursor] = cursor).slice(1));
 });
 
-const strings_normalize = list_fn(async (append, strings) => {
+const strings_normalize = fn_bind(fn_to_list, async (append, strings) => {
 	let end, rest;
 	for await(let string of await
 		(async () => [strings, ["\0"]])()
@@ -260,7 +273,7 @@ const hex_to_buffer = hex => new Uint8Array(Array(hex.length / 2)).map((a, i) =>
 
 const code_to_list = cursor => {
 	const [begin, end] = loop(Symbol);
-	return list_unflatten(begin, end, list_concat([[begin], list_fn(async append => {
+	return list_unflatten(begin, end, list_concat([[begin], fn_to_list(async append => {
 		cursor = strings_normalize(cursor);
 		while(cursor = await strings_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|[^[#`\s\]]+(?=[[#`\s\]])/gu, cursor)){
 			const [, token] = [cursor] = cursor;
@@ -286,7 +299,7 @@ const code_to_list = cursor => {
 			}));
 		}
 		if(!/^\s*$/u.test(await string_concat(cursor))) throw_syntax_error();
-	})(), [end]]));
+	}), [end]]));
 };
 
 const string_to_utf8 = async string => new Uint8Array(await list_to_array(list_concat([...string].map(a => {
@@ -307,20 +320,7 @@ const number_to_uint = number => {
 	return new Uint8Array(array).buffer;
 };
 
-const is_buffer = a => {
-	try{
-		Reflect.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get.call(a);
-		return new Uint8Array(a).buffer;
-	}catch(error){
-		if(!(error instanceof TypeError)) throw error;
-	}
-};
-
 const buffer_to_binary = buffer => [...new Uint8Array(buffer)].map(a => String.fromCodePoint(a)).join("");
-
-const is_string = a => typeof a === "string";
-
-const is_number = a => typeof a === "number";
 
 const list_normalize = async list => {
 	if(await is_list(list)) return list_map(list_normalize, list);
@@ -348,13 +348,13 @@ const atom = async ([...modes], index0, fn) => {
 	const [async0, ...returns] = async();
 	await modes[index0](async () => {
 		const [async0, resolve] = async();
-		call(async index => {
+		call(fn, async index => {
 			if(index >= index0) return;
 			const async = atom(modes, index, fn).then(...returns);
 			resolve();
 			await async;
 			await hang;
-		}, fn).then(...returns).then(resolve);
+		}).then(...returns).then(resolve);
 		return async0;
 	});
 	return async0;
@@ -464,7 +464,7 @@ const reflexion = (() => {
 			for_each: async (entry = placeholder, fn) => {
 				if(entry === placeholder){
 					if(values_count) await node0.for_each(entry, value => node1.has(value) && fn(value));
-					values[1].forEach(async value => call(value, fn));
+					values[1].forEach(async value => call(fn, value));
 					return;
 				}
 				await Promise.all(methods.map(async method => {
@@ -487,7 +487,7 @@ const reflexion = (() => {
 		const define_commit = (reflexion, fn) => [
 			["on", "add"],
 			["off", "delete"],
-		].forEach(macros => reflexion[macros[0]] = fn(async (ref, wildcard, pattern, reflex) => ref[macros[1]](list_fn(async append => {
+		].forEach(macros => reflexion[macros[0]] = fn(async (ref, wildcard, pattern, reflex) => ref[macros[1]](fn_to_list(async append => {
 			const [begin, end] = loop(Symbol);
 			let matching;
 			for await(let a of list_flatten(begin, end, pattern)){
@@ -513,11 +513,11 @@ const reflexion = (() => {
 					: [["next", a]]
 				) await append(branch);
 			}
-		})(), reflex)));
+		}), reflex)));
 		const define_emit = (reflexion, fn) => {
 			reflexion.emit = fn(async (resolve, message) => {
 				message = await list_clone(message);
-				resolve(ref0.for_each(list_enum(message), fn_bind(call, reflexion, message)));
+				resolve(ref0.for_each(list_enum(message), reflex => reflex(reflexion, message)));
 			});
 		};
 		let closed;
