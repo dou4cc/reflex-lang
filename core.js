@@ -4,11 +4,16 @@
 
 const equal = (a, b) => [a].includes(b);
 
-const call = async (fn, ...args) => fn(...args);
+const async = () => {
+	let returns;
+	return [new Promise((...returns) => returns = returns1), ...returns];
+};
 
-const defer = async (fn, ...args) => (await fn)(...args);
+const gen = function*(fn){
+	for(; ; ) yield fn();
+};
 
-const fn_bind = (fn, ...args0) => (...args1) => fn(...args0, ...args1);
+const [hang] = async();
 
 const throw_unsupported_error = () => {
 	throw TypeError("Unsupported");
@@ -45,6 +50,34 @@ const catch_all = async (fn, ...args) => {
 	}
 };
 
+const call = async (fn, ...args) => fn(...args);
+
+const defer = async (fn, ...args) => (await fn)(...args);
+
+const fn_bind = (fn, ...args0) => (...args1) => fn(...args0, ...args1);
+
+const once = value => {
+	const queue = (function*(){
+		yield value;
+	})();
+	return () => {
+		const {done, value} = queue.next();
+		if(!done) return value;
+	};
+};
+
+const value = value => value;
+
+const thunk = fn_bind(fn_bind, value);
+
+const lazy = thunk => {
+	const [async0, resolve] = async();
+	return () => {
+		resolve({then: resolve => resolve(thunk())});
+		return async0;
+	};
+};
+
 const is_object = a => Object(a) === a;
 
 const is_list = async a => is_object(a) && Boolean(await catch_all(() => [
@@ -68,11 +101,6 @@ const is_buffer = a => {
 	}
 };
 
-const async = () => {
-	let returns;
-	return [new Promise((...returns) => returns = returns1), ...returns];
-};
-
 const scheduler = (free = () => {}) => {
 	let count = 0;
 	return async (...args) => {
@@ -86,19 +114,9 @@ const scheduler = (free = () => {}) => {
 	};
 };
 
-const once = value => {
-	const queue = (function*(){
-		yield value;
-	})();
-	return () => {
-		const {done, value} = queue.next();
-		if(!done) return value;
-	};
-};
-
 const thread = () => {
 	const queue = (async function*(){
-		while(true) await (yield)();
+		for(; ; ) await (yield)();
 	})();
 	const init = once(queue.next());
 	return async (...args) => {
@@ -109,14 +127,54 @@ const thread = () => {
 	};
 };
 
-const thunk = value => () => value;
-
-const lazy = thunk => {
-	const [async0, resolve] = async();
-	return () => {
-		resolve({then: resolve => resolve(thunk())});
-		return async0;
+const lock = () => {
+	const [thread0, thread1] = gen(thread);
+	return async (mode, ...args) => {
+		switch(mode){
+		case "readonly": return (await thread0(() => thunk(thread1(thunk(call(...args))))))();
+		case "readwrite": return thread0(thread1, ...args);
+		}
+		throw_unsupported_error();
 	};
+};
+
+const atom = async ([...modes], index0, fn, ...args) => {
+	index0 = Math.min(modes.length - 1, Math.floor(index0));
+	const [async0, ...returns] = async();
+	await modes[index0](async () => {
+		const [async0, resolve] = async();
+		(async () => resolve(await call(fn, async index => {
+			if(index >= index0) return;
+			const async = atom(modes, index, fn, ...args).then(...returns);
+			resolve();
+			await async;
+			await hang;
+		}, ...args).then(...returns)))();
+		return async0;
+	});
+	return async0;
+};
+
+const lock_map = () => {
+	const lock0 = lock();
+	const map = new Map;
+	return fn_bind(lock0, "readwrite", (key, ...args) => {
+		if(!map.has(key)){
+			const lock1 = fn_bind(scheduler(fn_bind(atom, [
+				fn_bind(lock0, "readwrite"),
+				fn_bind(lock0, "readonly"),
+				call,
+			], 2, async (mode, idle) => {
+				if(!idle()) return;
+				await mode(1);
+				if(map.get(key) !== lock1) return;
+				await mode(0);
+				map.delete(key);
+			})), lock());
+			map.set(ket, lock1);
+		}
+		return map.get(key)(...args);
+	});
 };
 
 const list = () => {
@@ -126,7 +184,7 @@ const list = () => {
 		const thread0 = thread();
 		let [entry, resolve0] = async();
 		resolve([
-			value => thread0(() => {
+			value => {
 				const resolve1 = resolve0;
 				const [next] = [, resolve0] = async();
 				const [async0, resolve] = async();
@@ -135,20 +193,19 @@ const list = () => {
 					return next;
 				}), value]);
 				return async0;
-			}),
-			() => thread0(() => resolve0()),
-			reason => thread0(() => resolve0((async () => {
+			},
+			() => resolve0(),
+			reason => resolve0((async () => {
 				throw reason;
-			})())),
-		]);
+			})()),
+		].map(fn => fn_bind(thread0, fn)));
 		return entry;
 	});
 	return [{[key]: () => {
-		const thread0 = thread();
 		let cursor = entry;
 		const iter = {
 			[key]: () => iter,
-			next: () => thread0(async () => {
+			next: fn_bind(thread(), async () => {
 				if(cursor){
 					const cursor1 = cursor;
 					cursor = null;
@@ -188,17 +245,13 @@ const list_destructure = async list => {
 	return [];
 };
 
-const loop = function*(fn = i => i){
-	for(let i = 0; ; i += 1) yield fn(i);
-};
-
 const list_map = fn_bind(fn_to_list, async (append, fn, list) => {
 	for await(let a of list) await append((async () => fn(await a))());
 });
 
 const list_flat_map = async (fn, list) => await is_list(list) ? list_map(fn_bind(list_flat_map, fn), list) : fn(list);
 
-const list_clone = fn_bind(list_flat_map, a => a);
+const list_clone = fn_bind(list_flat_map, value);
 
 const list_flatten = fn_bind(fn_to_list, async (append, begin, end, list) => {
 	if(!await is_list(list)) return append(list);
@@ -272,7 +325,7 @@ const string_to_number = (a, radix = 10) => {
 const hex_to_buffer = hex => new Uint8Array(Array(hex.length / 2)).map((a, i) => string_to_number(hex.substr(i * 2, 2).replace(/^(?:0(?!$))*/u, ""), 16)).buffer;
 
 const code_to_list = cursor => {
-	const [begin, end] = loop(Symbol);
+	const [begin, end] = gen(Symbol);
 	return list_unflatten(begin, end, list_concat([[begin], fn_to_list(async append => {
 		cursor = strings_normalize(cursor);
 		while(cursor = await strings_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|[^[#`\s\]]+(?=[[#`\s\]])/gu, cursor)){
@@ -328,36 +381,6 @@ const list_normalize = async list => {
 	if(is_string(list)) return buffer_to_binary(await string_to_utf8(list));
 	if(is_number(list)) return buffer_to_binary(number_to_uint(list));
 	return list;
-};
-
-const lock = () => {
-	const [thread0, thread1] = loop(thread);
-	return async (mode, fn) => {
-		switch(mode){
-		case "readonly": return (await thread0(() => thunk(thread1(thunk(call(fn))))))();
-		case "readwrite": return thread0(() => thread1(fn));
-		}
-		throw_unsupported_error();
-	};
-};
-
-const [hang] = async();
-
-const atom = async ([...modes], index0, fn) => {
-	index0 = Math.min(modes.length - 1, Math.floor(index0));
-	const [async0, ...returns] = async();
-	await modes[index0](async () => {
-		const [async0, resolve] = async();
-		call(fn, async index => {
-			if(index >= index0) return;
-			const async = atom(modes, index, fn).then(...returns);
-			resolve();
-			await async;
-			await hang;
-		}).then(...returns).then(resolve);
-		return async0;
-	});
-	return async0;
 };
 
 const reflexion = (() => {
@@ -487,8 +510,8 @@ const reflexion = (() => {
 		const define_commit = (reflexion, fn) => [
 			["on", "add"],
 			["off", "delete"],
-		].forEach(macros => reflexion[macros[0]] = fn(async (ref, wildcard, pattern, reflex) => ref[macros[1]](fn_to_list(async append => {
-			const [begin, end] = loop(Symbol);
+		].forEach(macros => reflexion[macros[0]] = fn_bind(fn, async (ref, wildcard, pattern, reflex) => ref[macros[1]](fn_to_list(async append => {
+			const [begin, end] = gen(Symbol);
 			let matching;
 			for await(let a of list_flatten(begin, end, pattern)){
 				a = await a;
@@ -515,7 +538,7 @@ const reflexion = (() => {
 			}
 		}), reflex)));
 		const define_emit = (reflexion, fn) => {
-			reflexion.emit = fn(async (resolve, message) => {
+			reflexion.emit = fn_bind(fn, async (resolve, message) => {
 				message = await list_clone(message);
 				resolve(ref0.for_each(list_enum(message), reflex => reflex(reflexion, message)));
 			});
@@ -523,7 +546,7 @@ const reflexion = (() => {
 		let closed;
 		const lock0 = lock();
 		const reflexion0 = {};
-		define_commit(reflexion0, commit => async (...args) => {
+		define_commit(reflexion0, async (commit, ...args) => {
 			await lock0("readonly", () => {
 				assert_not_closed();
 				forked = true;
@@ -532,7 +555,7 @@ const reflexion = (() => {
 			await commit(ref, ...args);
 			return reflexion(ref);
 		});
-		define_emit(reflexion0, emit => async (...args) => {
+		define_emit(reflexion0, async (emit, ...args) => {
 			const [async0, resolve] = async();
 			await lock0("readonly", async () => {
 				assert_not_closed();
@@ -548,7 +571,7 @@ const reflexion = (() => {
 				let used;
 				const lock0 = lock();
 				const reflexion0 = {};
-				define_commit(reflexion0, commit => async (...args) => {
+				define_commit(reflexion0, async (commit, ...args) => {
 					await lock0("readwrite", async () => {
 						assert_not_used();
 						used = true;
@@ -556,7 +579,7 @@ const reflexion = (() => {
 					await commit(ref0, ...args);
 					return reflexion1();
 				});
-				define_emit(reflexion0, emit => async (...args) => {
+				define_emit(reflexion0, async (emit, ...args) => {
 					const [async0, resolve] = async();
 					await lock0("readonly", async () => {
 						assert_not_used();
@@ -567,9 +590,7 @@ const reflexion = (() => {
 				reflexion0.close = () => {};
 				return reflexion0;
 			};
-			if(closed) return;
-			closed = true;
-			return forked ? reflexion(ref0, forked) : reflexion1();
+			if(closed === (closed = true)) return forked ? reflexion(ref0, forked) : reflexion1();
 		});
 		return reflexion0;
 	};
