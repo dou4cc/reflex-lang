@@ -15,41 +15,6 @@ const gen = function*(fn){
 
 const [hang] = async();
 
-const throw_unsupported_error = () => {
-	throw TypeError("Unsupported");
-};
-
-const throw_call_stack_error = (async () => {
-	const samples = [
-		() => {
-			const fn = () => !fn();
-			fn();
-		},
-	].map(fn => {
-		try{
-			fn();
-		}catch(error){
-			return error;
-		}
-		throw_unsupported_error();
-	});
-	return error => {
-		if(samples.some(sample => equal(error.toString(), sample.toString()))) throw error;
-	};
-})();
-
-const throw_syntax_error = () => {
-	throw SyntaxError("Unexpected token");
-};
-
-const catch_all = async (fn, ...args) => {
-	try{
-		return fn(...args);
-	}catch(error){
-		(await throw_call_stack_error)(error);
-	}
-};
-
 const call = async (fn, ...args) => fn(...args);
 
 const defer = async (fn, ...args) => (await fn)(...args);
@@ -76,6 +41,41 @@ const lazy = thunk => {
 		resolve({then: resolve => resolve(thunk())});
 		return async0;
 	};
+};
+
+const throw_unsupported_error = () => {
+	throw TypeError("Unsupported");
+};
+
+const throw_call_stack_error = defer(() => {
+	const samples = [
+		() => {
+			const fn = () => !fn();
+			fn();
+		},
+	].map(fn => {
+		try{
+			fn();
+		}catch(error){
+			return error;
+		}
+		throw_unsupported_error();
+	});
+	return error => {
+		if(samples.some(sample => equal(error.toString(), sample.toString()))) throw error;
+	};
+});
+
+const throw_syntax_error = () => {
+	throw SyntaxError("Unexpected token");
+};
+
+const catch_all = async (fn, ...args) => {
+	try{
+		return fn(...args);
+	}catch(error){
+		(await throw_call_stack_error)(error);
+	}
 };
 
 const is_object = a => Object(a) === a;
@@ -155,23 +155,25 @@ const atom = async ([...modes], index0, fn, ...args) => {
 	return async0;
 };
 
-const lock_map = () => {
+const atom_lock = (lock, ...args) => atom([
+	fn_bind(lock, "readwrite"),
+	fn_bind(lock, "readonly"),
+	call,
+], ...args);
+
+const threads = () => {
 	const lock0 = lock();
 	const map = new Map;
 	return fn_bind(lock0, "readwrite", (key, ...args) => {
 		if(!map.has(key)){
-			const lock1 = fn_bind(scheduler(fn_bind(atom, [
-				fn_bind(lock0, "readwrite"),
-				fn_bind(lock0, "readonly"),
-				call,
-			], 2, async (mode, idle) => {
+			const thread0 = fn_bind(scheduler(fn_bind(atom_lock, lock0, 2, async (mode, idle) => {
 				if(!idle()) return;
 				await mode(1);
-				if(map.get(key) !== lock1) return;
+				if(map.get(key) !== thread0) return;
 				await mode(0);
 				map.delete(key);
-			})), lock());
-			map.set(ket, lock1);
+			})), thread());
+			map.set(ket, thread0);
 		}
 		return map.get(key)(...args);
 	});
@@ -397,6 +399,33 @@ const reflexion = (() => {
 			}
 			return [];
 		}] : [];
+	};
+	const node = (node0, free = () => {}) => {
+		const placeholder = Symbol();
+		const {methods: [...methods]} = node0;
+		let {values_count = 0, children_count = 0} = node0;
+		if(!values_count && !children_count) node0 = null;
+		const [values_lock, children_lock] = gen(lock);
+		const values = {};
+		values.threads = threads();
+		[values.black, values.white] = gen(() => new Set);
+		const branches = new Map(methods.map(method => [method, {
+			threads: threads();
+			black: new Set,
+			white: new Map,
+		}]));
+		return {
+			methods,
+			values_count,
+			children_count,
+			child: (method, key) => {
+				const children = branches.get(method);
+				return children.threads(key, async () => {
+					if(!children.has(key)){
+					}
+				});
+			},
+		};
 	};
 	const node = (node0, free = () => {}) => {
 		const check = () => {
