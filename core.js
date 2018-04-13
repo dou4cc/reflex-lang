@@ -193,7 +193,7 @@ const list = () => {
 				resolve1([lazy(() => {
 					resolve();
 					return next;
-				}), value]);
+				}), (async () => list_clone(await value))()]);
 				return async0;
 			},
 			() => resolve0(),
@@ -281,7 +281,7 @@ const strings_match = async (regex, strings) => {
 	let $;
 	while(!($ = regex.exec(string))){
 		const [first] = [, strings] = await list_destructure(strings);
-		if(!strings) return;
+		if(!strings) return null;
 		string += await first;
 	}
 	return [list_concat([[string.slice(regex.lastIndex)], strings]), ...$];
@@ -401,6 +401,22 @@ const reflexion = (() => {
 		}] : [];
 	};
 	const node = (node0, free = () => {}) => {
+		const create_child = (children, key, child = {methods}) => {
+			children.white.set(key, node(child, async () => {
+				children.white.delete(key);
+				await children_lock("readonly", () => children_count && children.black.add(key));
+				node1.children_count -= 1;
+				await free();
+			}));
+		};
+		const clear = async () => {
+			const [a, b] = await Promise.all([
+				values_lock("readonly", () => values_count || values.black.clear()),
+				children_lock("readonly", () => children_count || branches.forEach(({black}) => black.clear())),
+			]);
+			if(!a && !b) node0 = null;
+		};
+		free = fn_bind(free, () => !node1.values_count && !node1.children_count);
 		const placeholder = Symbol();
 		const {methods: [...methods]} = node0;
 		let {values_count = 0, children_count = 0} = node0;
@@ -414,18 +430,34 @@ const reflexion = (() => {
 			black: new Set,
 			white: new Map,
 		}]));
-		return {
+		const node1 = {
 			methods,
 			values_count,
 			children_count,
 			child: (method, key) => {
 				const children = branches.get(method);
 				return children.threads(key, async () => {
-					if(!children.has(key)){
+					if(!children.white.has(key)){
+						if(children.black.has(key)) return null;
+						const [temp = placeholder] = [await atom_lock(children_lock, 1, async mode => {
+							if(!children_count) return null;
+							await mode(0);
+							const child = await node0.child(method, key);
+							if(!child){
+								children.black.add(key);
+								return child;
+							}
+							create_child(children, key, child);
+							children_count -= 1;
+							clear();
+						})];
+						if(temp !== placeholder) return temp;
 					}
+					return children.white.get(key);
 				});
 			},
 		};
+		return node1;
 	};
 	const node = (node0, free = () => {}) => {
 		const check = () => {
