@@ -44,7 +44,7 @@ const lazy = thunk => {
 };
 
 const throw_unsupported_error = () => {
-	throw TypeError("Unsupported");
+	throw new TypeError("Unsupported");
 };
 
 const throw_call_stack_error = defer(() => {
@@ -67,15 +67,26 @@ const throw_call_stack_error = defer(() => {
 });
 
 const throw_syntax_error = () => {
-	throw SyntaxError("Unexpected token");
+	throw new SyntaxError("Unexpected token");
 };
 
-const catch_all = async (fn, ...args) => {
+const catch_all = async (...args) => {
 	try{
-		return fn(...args);
+		return await call(...args);
 	}catch(error){
 		(await throw_call_stack_error)(error);
 	}
+};
+
+const no_error = async (resolve, ...args) => {
+	try{
+		return await call(...args);
+	}catch(error){
+		resolve((async () => {
+			throw error;
+		})());
+	}
+	await hang;
 };
 
 const is_object = a => Object(a) === a;
@@ -103,14 +114,16 @@ const is_buffer = a => {
 
 const scheduler = (free = () => {}) => {
 	let count = 0;
-	return async (...args) => {
-		const [async0, ...returns] = async();
-		const async1 = call(...args).then(...returns);
-		count += 1;
-		await async1;
-		count -= 1;
-		defer(free, () => !count);
-		return async0;
+	return (fn, ...args) => {
+		const async0 = fn(...args);
+		return (async () => {
+			const [async1, ...returns] = async();
+			count += 1;
+			await (async () => async0)().then(...returns);
+			count -= 1;
+			defer(free, () => !count);
+			return async1;
+		})();
 	};
 };
 
@@ -129,30 +142,41 @@ const thread = () => {
 
 const lock = () => {
 	const [thread0, thread1] = gen(thread);
-	return async (mode, ...args) => {
+	return (mode, ...args) => {
 		switch(mode){
-		case "readonly": return (await thread0(() => thunk(thread1(thunk(call(...args))))))();
-		case "readwrite": return thread0(thread1, ...args);
+			case "readonly":
+			return (async () => {
+				const [async0, resolve] = async();
+				await thread0(() => resolve(thread1(thunk(call(...args)))));
+				return async0;
+			})();
+			case "readwrite":
+			return thread0(thread1, ...args);
 		}
 		throw_unsupported_error();
 	};
 };
 
-const atom = async ([...modes], index0, fn, ...args) => {
+const atom = ([...modes], index0, fn, ...args) => {
 	index0 = Math.min(modes.length - 1, Math.floor(index0));
 	const [async0, ...returns] = async();
-	await modes[index0](async () => {
+	const async1 = modes[index0](() => {
 		const [async0, resolve] = async();
-		(async () => resolve(await call(fn, async index => {
+		(async () => resolve(await call(fn, index => {
 			if(index >= index0) return;
-			const async = atom(modes, index, fn, ...args).then(...returns);
-			resolve();
-			await async;
-			await hang;
+			const async = atom(modes, index, fn, ...args);
+			return (async () => {
+				resolve();
+				await (async () => async)().then(...returns);
+				await hang;
+			})();
 		}, ...args).then(...returns)))();
 		return async0;
 	});
-	return async0;
+	return (async () => {
+		await async1;
+		return async0;
+	})();
 };
 
 const atom_lock = (lock, ...args) => atom([
@@ -184,7 +208,8 @@ const list = () => {
 	const [returns, resolve] = async();
 	const entry = lazy(() => {
 		const thread0 = thread();
-		let [entry, resolve0] = async();
+		let resolve0;
+		const [entry] = [, resolve0] = async();
 		resolve([
 			value => {
 				const resolve1 = resolve0;
@@ -209,9 +234,9 @@ const list = () => {
 			[key]: () => iter,
 			next: fn_bind(thread(), async () => {
 				if(cursor){
-					const cursor1 = cursor;
+					const cursor0 = cursor;
 					cursor = null;
-					cursor = await cursor1();
+					cursor = await cursor0();
 				}
 				return cursor ? {done: false, value: ([cursor] = cursor)[1]} : {done: true};
 			}),
@@ -224,7 +249,7 @@ const fn_to_list = (fn, ...args) => {
 	const [list0, returns0] = list();
 	(async () => {
 		const [append, ...returns] = await returns0;
-		await call(fn, append, ...args).then(...returns);
+		call(fn, append, ...args).then(...returns);
 	})();
 	return list0;
 };
@@ -240,13 +265,6 @@ const list_to_array = async list => {
 	return Promise.all(array);
 };
 
-const list_destructure = async list => {
-	for await(let first of list) return [first, fn_to_list(async append => {
-		for await(let a of list) await append(a);
-	})];
-	return [];
-};
-
 const list_map = fn_bind(fn_to_list, async (append, fn, list) => {
 	for await(let a of list) await append((async () => fn(await a))());
 });
@@ -254,6 +272,14 @@ const list_map = fn_bind(fn_to_list, async (append, fn, list) => {
 const list_flat_map = async (fn, list) => await is_list(list) ? list_map(fn_bind(list_flat_map, fn), list) : fn(list);
 
 const list_clone = fn_bind(list_flat_map, value);
+
+const list_destructure = async list0 => {
+	const list = (async function*(){
+		for await(let a of list0) yield thunk(a);
+	})();
+	const {done, value} = await list.next();
+	return done ? [] : [value(), list_map(call, list)];
+};
 
 const list_flatten = fn_bind(fn_to_list, async (append, begin, end, list) => {
 	if(!await is_list(list)) return append(list);
@@ -366,7 +392,7 @@ const string_to_utf8 = async string => new Uint8Array(await list_to_array(list_c
 })))).buffer;
 
 const number_to_uint = number => {
-	if(!Number.isSafeInteger(number) || number < 0) throw TypeError("Only safe natural number can be converted to uint.");
+	if(!Number.isSafeInteger(number) || number < 0) throw new TypeError("Only safe natural number can be converted to uint.");
 	const array = [];
 	while(number >= 1){
 		array.push(number % 0xff);
@@ -385,42 +411,84 @@ const list_normalize = async list => {
 	return list;
 };
 
-const reflexion = (() => {
-	const list_enum = (list, exit0) => {
-		const list0 = (async () => await is_list(list) && list_clone(list))();
-		return async method => method === "enter" && await list0 ? [async method => {
+const reflexion = defer(() => {
+	const list_enum = (list0, exit0) => {
+		const list = (async () => await is_list(list0) && list_clone(list0))();
+		return async method => method === "enter" && await list ? [async method => {
 			if(method === "exit") return [exit0];
-			const [first, rest] = await list_destructre(await list0);
-			const exit = fn_bind(defer, (async () => (await list_enum(rest, exit0)("enter"))[0])());
+			const [first, rest] = await list_destructre(await list);
+			const exit = fn_bind(defer, defer(async () => (await list_enum(rest, exit0)("enter"))[0]));
 			switch(method){
-			case "done": return [exit, !rest];
-			case "enter": return list_enum(await first, exit)("enter");
-			case "next": return [exit, rest ? await first : Symbol()];
+				case "done":
+				return [exit, !rest];
+				case "enter":
+				return list_enum(await first, exit)("enter");
+				case "next":
+				return [exit, rest ? await first : Symbol()];
 			}
 			return [];
 		}] : [];
 	};
 	const node = (node0, free = () => {}) => {
+		const count = node => node.values_count + node.children_count;
+		const check = () => {
+			if(!count(node1)) return free();
+		};
 		const create_child = (children, key, child = {methods}) => {
-			children.white.set(key, node(child, async () => {
+			child = node(child, async () => {
 				children.white.delete(key);
 				await children_lock("readonly", () => children_count && children.black.add(key));
 				node1.children_count -= 1;
-				await free();
-			}));
+				await check();
+			});
+			children.white.set(key, child);
+			return child;
 		};
-		const clear = async () => {
-			const [a, b] = await Promise.all([
+		const sweep = fn_bind(defer, async () => {
+			if(!(await list_to_array([
 				values_lock("readonly", () => values_count || values.black.clear()),
 				children_lock("readonly", () => children_count || branches.forEach(({black}) => black.clear())),
-			]);
-			if(!a && !b) node0 = null;
+			])).some(value)) node0 = null;
+		});
+		const has = value => {
+			if(values.white.has(value)) return true;
+			if(values.black.has(value)) return false;
+			return atom_lock(values_lock, 1, async mode => {
+				if(!values_count) return false;
+				await mode(0);
+				if(!await node0.has(value)){
+					values.black.add(value);
+					return false;
+				}
+				values.white.add(value);
+				values_count -= 1;
+				sweep();
+				return true;
+			});
 		};
-		free = fn_bind(free, () => !node1.values_count && !node1.children_count);
+		const child = (method, key) => {
+			const children = branches.get(method);
+			if(children.white.has(key)) return children.white.get(key);
+			if(children.black.has(key)) return null;
+			return atom_lock(children_lock, 1, async mode => {
+				if(!children_count) return null;
+				await mode(0);
+				const child0 = await node0.child(method, key);
+				if(child0){
+					const child = create_child(children, key, child0);
+					children_count -= 1;
+					sweep();
+					return child;
+				}
+				children.black.add(key);
+				return child;
+			});
+		};
 		const placeholder = Symbol();
 		const {methods: [...methods]} = node0;
+		const lock0 = lock();
 		let {values_count = 0, children_count = 0} = node0;
-		if(!values_count && !children_count) node0 = null;
+		sweep();
 		const [values_lock, children_lock] = gen(lock);
 		const values = {};
 		values.threads = threads();
@@ -434,127 +502,83 @@ const reflexion = (() => {
 			methods,
 			values_count,
 			children_count,
-			child: (method, key) => {
-				const children = branches.get(method);
-				return children.threads(key, async () => {
-					if(!children.white.has(key)){
-						if(children.black.has(key)) return null;
-						const [temp = placeholder] = [await atom_lock(children_lock, 1, async mode => {
-							if(!children_count) return null;
-							await mode(0);
-							const child = await node0.child(method, key);
-							if(!child){
-								children.black.add(key);
-								return child;
-							}
-							create_child(children, key, child);
-							children_count -= 1;
-							clear();
-						})];
-						if(temp !== placeholder) return temp;
-					}
-					return children.white.get(key);
-				});
-			},
-		};
-		return node1;
-	};
-	const node = (node0, free = () => {}) => {
-		const check = () => {
-			if(!node1.values_count && !node1.children_count) free();
-		};
-		const create_child = (method, key, child = {methods}) => {
-			const index = methods.indexOf(method);
-			children[1][index].set(key, node(child, () => {
-				if(children_count) children[0][index].add(key);
-				children[1][index].delete(key);
-				check();
-			}));
-		};
-		const placeholder = Symbol();
-		const {methods} = node0;
-		let {values_count = 0, children_count = 0} = node0;
-		if(!values_count && !children_count) node0 = null;
-		const values = [...loop(() => new Set, 2)];
-		const children = [Set, Map].map(struct => methods.map(() => new struct));
-		const node1 = {
-			methods,
-			values_count,
-			children_count,
-			child: (method, key) => {
-				const index = methods.indexOf(method);
-				if(!children[1][index].has(key)){
-					if(!children_count || children[0][index].has(key)) return;
-					const child = node0.child(method, key);
-					if(!child){
-						children[0][index].add(key);
+			add: async (cursor, value) => {
+				cursor = defer(list_destructure, cursor);
+				const [async0, resolve] = async();
+				await lock0("readwrite", async () => {
+					const [branch] = [, cursor] = await cursor;
+					if(!cursor) return resolve(values.threads(value, async () => {
+						if(await has(value)) return;
+						values.white.add(value);
+						node1.values_count += 1;
 						return;
-					}
-					create_child(method, key, child);
-					children_count -= 1;
-					if(!children_count){
-						children[0].clear();
-						if(!values_count) node0 = null;
-					}
-				}
-				return children[1][index].get(key);
+					}));
+					const [method, key] = await list_to_array(await branch);
+					const children = branches.get(method);
+					resolve(children.threads(key, async () => {
+						let child0 = await child(method, key);
+						if(!child0){
+							child0 = create_child(children, key);
+							node1.children_count += 1;
+						}
+						child0.add(cursor, value);
+					}));
+				});
+				return async0;
 			},
-			has: value => {
-				if(values[1].has(value)) return true;
-				if(!values_count) return false;
-				if(values[0].has(value)) return false;
-				if(!node0.has(value)){
-					values[0].add(value);
-					return false;
-				}
-				values[1].add(value);
-				values_count -= 1;
-				if(!values_count){
-					values[1].clear();
-					if(!children_count) node0 = null;
-				}
-				return true;
+			delete: async (cursor, value) => {
+				cursor = defer(list_destructure, cursor);
+				const [async0, resolve] = async();
+				await lock0("readwrite", async () => {
+					const [branch] = [, cursor] = await cursor;
+					if(!cursor) return resolve(values.threads(value, async () => {
+						if(!await has(value)) return;
+						values.white.delete(value);
+						await values_lock("readonly", () => values_count && values.black.add(value));
+						node1.values_count -= 1;
+						await check();
+					}));
+					const [method, key] = await list_to_array(await branch);
+					resolve(branches.get(method).threads(key, async () => {
+						const child0 = await child(method, key);
+						if(!child0) return;
+						const count0 = count(child0);
+						const async = child0.delete(cursor, value);
+						if(count0 <= 1) await async;
+					}));
+				});
+				return async0;
 			},
-			add: async (path, value) => {
-				path = await list_uncache(path);
-				const {value: i, done} = await path.next();
-				if(done){
-					if(node1.has(value)) return;
-					values[1].add(value);
-					node1.values_count += 1;
-					return;
-				}
-				const [method, key] = await list_to_array(await i);
-				if(!node1.child(method, key)){
-					create_child(method, key);
-					node1.children_count += 1;
-				}
-				await node1.child(method, key).add(path, value);
+			has: async value => {
+				const [async0, resolve] = async();
+				await lock0("readonly", () => resolve(values.threads(value, has, value)));
+				return async0;
 			},
-			delete: async (path, value) => {
-				path = await list_uncache(path);
-				const {value: i, done} = await path.next();
-				if(done){
-					if(!node1.has(value)) return;
-					if(values_count) values[0].add(value);
-					values[1].delete(value);
-					node1.values_count -= 1;
-					check();
-					return;
-				}
-				const [method, key] = await list_to_array(await i);
-				if(node1.child(method, key)) await node1.child(method, key).delete(path, value);
+			child: async (method, key) => {
+				const [async0, resolve] = async();
+				await lock0("readonly", () => resolve(branches.get(method).threads(key, child, method, key)));
+				return async0;
 			},
 			for_each: async (entry = placeholder, fn) => {
-				if(entry === placeholder){
-					if(values_count) await node0.for_each(entry, value => node1.has(value) && fn(value));
-					values[1].forEach(async value => call(fn, value));
-					return;
-				}
-				await Promise.all(methods.map(async method => {
-					const [next, key] = await entry(method);
-					if(node1.child(method, key)) await node1.child(method, key).for_each(next, fn);
-				}));
+				const [async0, resolve] = async();
+				await lock0("readonly", async () => {
+					if(entry !== placeholder) return Promise.all(methods.map(async method => {
+						const [next, key] = await defer(entry, method);
+						const child0 = await child(method, key);
+						if(child0) child0.for_each(next, fn);
+					}));
+					await atom_lock(values_lock, 1, async mode => {
+						if(!values_count) return;
+						await mode(0);
+						await node0.for_each(entry, value => values.black.has(value) || values.white.add(value));
+						values_count = 0;
+						sweep();
+					});
+					const values0 = [...values.white];
+					resolve(defer(() => Promise.all(values0.map(value => defer(fn, value)))));
+				});
+				resolve();
+				return async0;
 			},
 		};
 		return node1;
@@ -566,7 +590,7 @@ const reflexion = (() => {
 		"next",
 	]}), forked) => {
 		const assert_not_closed = () => {
-			if(closed) throw TypeError("Closed");
+			if(closed) throw new TypeError("Closed");
 		};
 		const define_commit = (reflexion, fn) => [
 			["on", "add"],
@@ -599,9 +623,9 @@ const reflexion = (() => {
 			}
 		}), reflex)));
 		const define_emit = (reflexion, fn) => {
-			reflexion.emit = fn_bind(fn, async (resolve, message) => {
+			reflexion.emit = fn_bind(fn, async message => {
 				message = await list_clone(message);
-				resolve(ref0.for_each(list_enum(message), reflex => reflex(reflexion, message)));
+				ref0.for_each(list_enum(message), reflex => reflex(reflexion, message));
 			});
 		};
 		let closed;
@@ -616,13 +640,11 @@ const reflexion = (() => {
 			await commit(ref, ...args);
 			return reflexion(ref);
 		});
-		define_emit(reflexion0, async (emit, ...args) => {
-			const [async0, resolve] = async();
-			await lock0("readonly", async () => {
+		define_emit(reflexion0, (emit, ...args) => {
+			lock0("readonly", async () => {
 				assert_not_closed();
-				await emit(resolve, ...args);
+				await emit(...args);
 			});
-			return async0;
 		});
 		reflexion0.close = fn_bind(lock0, "readwrite", async () => {
 			const reflexion1 = () => {
@@ -637,16 +659,14 @@ const reflexion = (() => {
 						assert_not_used();
 						used = true;
 					});
-					await commit(ref0, ...args);
+					commit(ref0, ...args);
 					return reflexion1();
 				});
-				define_emit(reflexion0, async (emit, ...args) => {
-					const [async0, resolve] = async();
-					await lock0("readonly", async () => {
+				define_emit(reflexion0, (emit, ...args) => {
+					lock0("readonly", async () => {
 						assert_not_used();
-						await emit(resolve, ...args);
+						await emit(...args);
 					});
-					return async0;
 				});
 				reflexion0.close = () => {};
 				return reflexion0;
@@ -658,7 +678,7 @@ const reflexion = (() => {
 	const reflexion0 = reflexion();
 	Reflect.deleteProperty(reflexion0, "close");
 	return reflexion0;
-})();
+});
 
 const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
 
