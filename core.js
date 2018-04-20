@@ -535,7 +535,6 @@ const reflexion = defer(() => {
 		const placeholder = Symbol();
 		const methods = [...node0.methods];
 		let {values_count = 0, children_count = 0} = node0;
-		sweep();
 		const [
 			lock0,
 			values_lock,
@@ -662,6 +661,7 @@ const reflexion = defer(() => {
 				await async0;
 			},
 		};
+		sweep();
 		return node1;
 	};
 	const reflexion = (ref0 = node({methods: [
