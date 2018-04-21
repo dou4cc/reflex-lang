@@ -594,7 +594,7 @@ const reflexion = defer(() => {
 					if(!cursor){
 						values_mutex[1](values.threads, value, async () => {
 							if(!await has(resolve, value)) return;
-							await no_error(resolve, values_count_lock, "readonly", () => values_count && values.black.add(value));
+							await no_error(resolve, values_lock, "readonly", () => values_count && values.black.add(value));
 							await no_error(resolve, () => node1.values_count -= 1);
 							values.white.delete(value);
 							await check(resolve);
@@ -643,7 +643,7 @@ const reflexion = defer(() => {
 						return;
 					}
 					values_mutex[2](async () => {
-						await atom_lock(values_count_lock, 1, async mode => {
+						await atom_lock(values_lock, 1, async mode => {
 							if(!values_count) return;
 							await mode(0);
 							await no_error(resolve, node0.for_each, entry, value => no_error(resolve, value, () => {
