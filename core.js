@@ -93,13 +93,15 @@ const no_error = async (resolve, ...args) => {
 
 const is_object = a => Object(a) === a;
 
-const is_list = async a => is_object(a) && Boolean(await catch_all(() => [
-	"asyncIterator",
-	"iterator",
-].some(key => {
-	const iter = a[Symbol[key]];
-	return iter != null && is_object(iter());
-})));
+const is_list = async a => is_object(a) && Boolean(await catch_all(() => {
+	for(let iter of [
+		"asyncIterator",
+		"iterator",
+	]){
+		iter = a[Symbol[iter]];
+		if(iter != null) return is_object(Function.prototype.call.call(iter, a));
+	}
+}));
 
 const is_string = a => typeof a === "string";
 
