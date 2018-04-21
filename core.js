@@ -467,7 +467,7 @@ const reflexion = defer(() => {
 		return async method => method === "enter" && await list0 ? [async method => {
 			if(method === "exit") return [exit0];
 			const [value, list] = await list_next(await list0);
-			const exit = fn_bind(defer, defer(async () => (await list_enum(list, exit0)("enter"))[0]));
+			const exit = fn_bind(defer, defer(async () => (await list_enum(list || [], exit0)("enter"))[0]));
 			switch(method){
 				case "done":
 				return [exit, !list];
