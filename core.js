@@ -78,19 +78,6 @@ const catch_all = async (...args) => {
 	}
 };
 
-const no_error = async (resolve, ...args) => {
-	try{
-		try{
-			return await call(...args);
-		}catch(error){
-			call(resolve, (async () => {
-				throw error;
-			})());
-		}
-	}catch(_){}
-	await hang;
-};
-
 const is_object = a => Object(a) === a;
 
 const is_list = async a => is_object(a) && Boolean(await catch_all(() => {
@@ -481,17 +468,17 @@ const reflexion = defer(() => {
 	};
 	const node = (node0, free = () => {}) => {
 		const count = node => node.values_count + node.children_count;
-		const check = async (...args) => {
-			if(!count(node1)) await free(...args);
+		const check = async () => {
+			if(!count(node1)) await free();
 		};
-		const create_child = async (resolve, children, key, child = {methods}) => {
-			child = node(child, async resolve => {
-				await no_error(resolve, children_lock, "readonly", () => children_count && children.black.add(key));
-				await no_error(resolve, () => node1.children_count -= 1);
+		const create_child = (children, key, child = {methods}) => {
+			child = node(child, async () => {
+				await children_lock("readonly", () => children_count && children.black.add(key));
 				children.white.delete(key);
-				await check(resolve);
+				node1.children_count -= 1;
+				await check();
 			});
-			await no_error(resolve, () => children.white.set(key, child));
+			children.white.set(key, child);
 			return child;
 		};
 		const sweep = fn_bind(defer, async () => {
@@ -500,7 +487,7 @@ const reflexion = defer(() => {
 				children_lock("readonly", () => children_count || branches.forEach(({black}) => black.clear())),
 			])).some(value)) node0 = null;
 		});
-		const has = (resolve, value) => {
+		const has = value => {
 			if(values.black.has(value)) return false;
 			if(values.white.has(value)) return true;
 			return atom_lock(values_lock, 1, async mode => {
@@ -510,13 +497,13 @@ const reflexion = defer(() => {
 					values.black.add(value);
 					return false;
 				}
-				await no_error(resolve, () => values.white.add(value));
-				await no_error(resolve, () => values_count -= 1);
+				values.white.add(value);
+				values_count -= 1;
 				sweep();
 				return true;
 			});
 		};
-		const child = (resolve, method, key) => {
+		const child = (method, key) => {
 			const children = branches.get(method);
 			if(children.black.has(key)) return null;
 			if(children.white.has(key)) return children.white.get(key);
@@ -525,8 +512,8 @@ const reflexion = defer(() => {
 				await mode(0);
 				const child0 = await node0.child(method, key);
 				if(child0){
-					const child = await create_child(resolve, children, key, child0);
-					await no_error(resolve, () => children_count -= 1);
+					const child = create_child(children, key, child0);
+					children_count -= 1;
 					sweep();
 					return child;
 				}
@@ -560,50 +547,42 @@ const reflexion = defer(() => {
 			children_count,
 			add: async (cursor, value) => {
 				cursor = defer(list_next, cursor);
-				const [async0, ...returns] = async();
+				const [async0, resolve] = async();
 				await lock0("readwrite", async () => {
 					const [branch] = [, cursor] = await cursor;
-					const [resolve] = returns;
-					if(!cursor){
-						values_mutex[1](values.threads, value, async () => {
-							if(await has(resolve, value)) return;
-							await no_error(resolve, () => values.white.add(value));
-							await no_error(resolve, () => node1.values_count += 1);
-						}).then(...returns);
-						return;
-					}
+					if(!cursor) return resolve(values_mutex[1](values.threads, value, async () => {
+						if(await has(value)) return;
+						node1.values_count += 1;
+						values.white.add(value);
+					}));
 					const [method, key] = await list_to_array(await branch);
 					const children = branches.get(method);
-					children_mutex[1](children.threads, key, async () => {
-						let child0 = await child(resolve, method, key);
+					resolve(children_mutex[1](children.threads, key, async () => {
+						let child0 = await child(method, key);
 						if(!child0){
-							child0 = await create_child(resolve, children, key);
-							await no_error(resolve, () => node1.children_count += 1);
+							node1.children_count += 1;
+							child0 = create_child(children, key);
 						}
 						child0.add(cursor, value);
-					}).then(...returns);
+					}));
 				});
 				await async0;
 			},
 			delete: async (cursor, value) => {
 				cursor = defer(list_next, cursor);
-				const [async0, ...returns] = async();
+				const [async0, resolve] = async();
 				await lock0("readwrite", async () => {
 					const [branch] = [, cursor] = await cursor;
-					const [resolve] = returns;
-					if(!cursor){
-						values_mutex[1](values.threads, value, async () => {
-							if(!await has(resolve, value)) return;
-							await no_error(resolve, values_lock, "readonly", () => values_count && values.black.add(value));
-							await no_error(resolve, () => node1.values_count -= 1);
-							values.white.delete(value);
-							await check(resolve);
-						}).then(...returns);
-						return;
-					}
+					if(!cursor) resolve(values_mutex[1](values.threads, value, async () => {
+						if(!await has(value)) return;
+						await values_lock("readonly", () => values_count && values.black.add(value));
+						values.white.delete(value);
+						node1.values_count -= 1;
+						await check();
+					}));
 					const [method, key] = await list_to_array(await branch);
 					resolve(children_mutex[1](branches.get(method).threads, key, async () => {
-						const child0 = await child(resolve, method, key);
+						const child0 = await child(method, key);
 						if(!child0) return;
 						const count0 = count(child0);
 						const async = child0.delete(cursor, value);
@@ -613,54 +592,56 @@ const reflexion = defer(() => {
 				await async0;
 			},
 			has: async value => {
-				const [async0, ...returns] = async();
-				await lock0("readonly", () => {
-					const [resolve] = returns;
-					values_mutex[0](values.threads, value, has, resolve, value).then(...returns);
-				});
+				const [async0, resolve] = async();
+				await lock0("readonly", () => resolve(values_mutex[0](values.threads, value, has, value)));
 				return async0;
 			},
 			child: async (method, key) => {
-				const [async0, ...returns] = async();
-				await lock0("readonly", () => {
-					const [resolve] = returns;
-					children_mutex[0](branches.get(method).threads, key, child, resolve, method, key).then(...returns);
-				});
+				const [async0, resolve] = async();
+				await lock0("readonly", () => resolve(children_mutex[0](branches.get(method).threads, key, child, method, key)));
 				return async0;
 			},
-			for_each: async (cursor0 = placeholder, fn) => {
-				const [async0, ...returns] = async();
-				const [resolve] = returns;
-				resolve(await lock0("readonly", () => {
-					if(cursor0 !== placeholder){
-						children_mutex[2](async () => {
-							for(let a of methods.map(fn_bind(defer, async method => {
-								const [cursor, key] = await cursor0(method);
-								const child0 = await child(resolve, method, key);
-								if(child0) child0.for_each(cursor, fn);
-							}))) await a;
-						}).then(...returns);
-						return;
-					}
-					values_mutex[2](async () => {
-						await atom_lock(values_lock, 1, async mode => {
-							if(!values_count) return;
-							await mode(0);
-							await no_error(resolve, node0.for_each, entry, value => no_error(resolve, value, () => {
-								if(!values.black.has(value)) values.white.add(value);
+			for_each: (cursor0 = placeholder, fn) => {
+				if(cursor0 === placeholder) return (async () => {
+					const [async0, ...returns] = async();
+					const [resolve] = returns;
+					await lock0("readonly", () => {
+						values_mutex[2](async () => {
+							await atom_lock(values_lock, 1, async mode => {
+								if(!values_count) return;
+								await mode(0);
+								const [async0, ...returns] = async();
+								const [resolve] = returns;
+								call(node0.for_each, entry, value => {
+									try{
+										if(!values.black.has(value)) values.white.add(value);
+									}catch(error){
+										resolve((async () => {
+											throw error;
+										})());
+									}
+								}).then(...returns);
+								await async0;
+								values_count = 0;
+								sweep();
+							});
+							const values0 = [...values.white];
+							resolve(defer(async () => {
+								try{
+									await list_to_array(list_map(value => defer(fn, value), values0));
+								}catch(_){}
 							}));
-							await no_error(resolve, () => values_count = 0);
-							sweep();
-						});
-						const values0 = [...values.white];
-						resolve(defer(async () => {
-							try{
-								for(let a of values0.map(value => defer(fn, value))) await a;
-							}catch(_){}
-						}));
-					}).then(...returns);
-				}));
-				await async0;
+						}).then(...returns);
+					});
+					await async0;
+				})();
+				lock0("readonly", () => {
+					children_mutex[2](list_to_array, list_map(fn_bind(defer, async method => {
+						const [cursor, key] = await cursor0(method);
+						const child0 = await child(method, key);
+						if(child0) child0.for_each(cursor, fn);
+					}), methods));
+				});
 			},
 		};
 		sweep();
@@ -762,6 +743,8 @@ const reflexion = defer(() => {
 	Reflect.deleteProperty(reflexion0, "close");
 	return reflexion0;
 });
+
+const buffer_random = () => 
 
 const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
 
