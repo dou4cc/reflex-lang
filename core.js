@@ -166,12 +166,12 @@ const mutex = () => {
 					thread1(thunk(call(...args).then(...returns)));
 					return;
 				}
-				const [async1, resolve] = async();
+				const [async0, resolve] = async();
 				thread1(() => {
 					resolve();
 					return call(...args);
 				}).then(...returns);
-				await async1;
+				await async0;
 				mode = macro;
 			});
 			return async0;
@@ -420,7 +420,8 @@ const string_to_utf8 = async string => new Uint8Array(await list_to_array(list_c
 	a = a.codePointAt();
 	if(a < 0x80) return [a];
 	const bytes = [];
-	for(let i = a, j = a = Math.floor(Math.log2(a) / 6) + 1; j; i >>= 6, j -= 1) bytes.unshift(0x80 | i & 0x3f);
+	for(let i = a, j = a = Math.floor(Math.log2(a) / 6) + 1; j; i >>= 6, j -= 1) bytes.push(0x80 | i & 0x3f);
+	bytes.reverse();
 	bytes[0] |= ~(1 << 8 - a) + 1;
 	return bytes;
 }, [...string])))).buffer;
@@ -438,7 +439,7 @@ const big_int_to_uint = fn_bind(fn_to_list, async (append, big_int) => {
 	await write(last);
 });
 
-const buffer_to_binary = buffer => [...new Uint8Array(buffer)].map(point => String.fromCodePoint(point)).join("");
+const buffer_to_binary = buffer => string_concat(list_map(String.fromCodePoint, new Uint8Array(buffer)))
 
 const list_normalize = async list => {
 	if(await is_list(list)) return list_map(list_normalize, list);
