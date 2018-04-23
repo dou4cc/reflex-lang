@@ -268,7 +268,7 @@ const [list, list_clone] = (() => {
 				return entry;
 			});
 			const list = {};
-			Reflect.defineProperty(list, key, {value: () => {
+			if(!Reflect.defineProperty(list, key, {value: () => {
 				let cursor = entry;
 				const iter = {
 					[key]: () => iter,
@@ -282,7 +282,7 @@ const [list, list_clone] = (() => {
 					}),
 				};
 				return iter;
-			}});
+			}})) throw_unsupported_error();
 			lists.add(list);
 			return [list, returns];
 		},
@@ -768,7 +768,7 @@ const reflexion = (() => {
 		);
 	};
 	const reflexion0 = reflexion();
-	Reflect.deleteProperty(reflexion0, "close");
+	if(!Reflect.deleteProperty(reflexion0, "close")) throw_unsupported_error();
 	return reflexion0;
 })();
 
