@@ -676,88 +676,91 @@ const reflexion = defer(() => {
 		const assert_not_closed = () => {
 			if(closed) throw new TypeError("Closed");
 		};
-		const define_commit = (reflexion, fn) => [
-			["on", "add"],
-			["off", "delete"],
-		].forEach(macros => reflexion[macros[0]] = fn_bind(fn, async (ref, wildcard, pattern, reflex) => ref[macros[1]](fn_to_list(async append => {
-			const [begin, end] = gen(Symbol);
-			let matching;
-			for await(let a of list_flatten(begin, end, pattern)){
-				a = await a;
-				if(matching){
-					matching = false;
-					if(a === end){
-						await append(["exit"]);
+		const create_reflexion = (commit, emit, close) => {
+			const reflexion = {};
+			[
+				["on", "add"],
+				["off", "delete"],
+			].forEach(macros => reflexion[macros[0]] = fn_bind(commit, async (ref, wildcard, pattern, reflex) => ref[macros[1]](fn_to_list(async append => {
+				const [begin, end] = gen(Symbol);
+				let matching;
+				for await(let a of list_flatten(begin, end, pattern)){
+					a = await a;
+					if(matching){
+						matching = false;
+						if(a === end){
+							await append(["exit"]);
+							continue;
+						}
+						await append(["done", false]);
+					}
+					if(equal(a, wildcard)){
+						matching = true;
 						continue;
 					}
-					await append(["done", false]);
+					for(let branch of
+						a === begin ? [["enter"]]
+						: a === end ? [
+							["done", true],
+							["exit"],
+						]
+						: [["next", a]]
+					) await append(branch);
 				}
-				if(equal(a, wildcard)){
-					matching = true;
-					continue;
-				}
-				for(let branch of
-					a === begin ? [["enter"]]
-					: a === end ? [
-						["done", true],
-						["exit"],
-					]
-					: [["next", a]]
-				) await append(branch);
-			}
-		}), reflex)));
-		const define_emit = (reflexion, fn) => {
-			reflexion.emit = fn_bind(fn, message => {
+			}), reflex)));
+			reflexion.emit = fn_bind(emit, message => {
 				message = defer(list_clone, message);
 				ref0.for_each(list_enum(message), async reflex => reflex(reflexion, await message));
 			});
+			reflexion.close = close;
+			return reflexion;
 		};
 		let closed;
 		const lock0 = lock();
-		const reflexion0 = {};
-		define_commit(reflexion0, async (commit, ...args) => {
-			await lock0("readonly", () => {
-				assert_not_closed();
-				forked = true;
-			});
-			const ref = node(ref0);
-			await commit(ref, ...args);
-			return reflexion(ref);
-		});
-		define_emit(reflexion0, (emit, ...args) => {
-			lock0("readonly", async () => {
-				assert_not_closed();
-				await emit(...args);
-			});
-		});
-		reflexion0.close = fn_bind(lock0, "readwrite", async () => {
-			const reflexion1 = () => {
-				const assert_not_used = () => {
-					if(used) assert_not_closed();
+		return create_reflexion(
+			async (commit, ...args) => {
+				await lock0("readonly", () => {
+					assert_not_closed();
+					forked = true;
+				});
+				const ref = node(ref0);
+				await commit(ref, ...args);
+				return reflexion(ref);
+			},
+			(emit, ...args) => {
+				lock0("readonly", async () => {
+					assert_not_closed();
+					await emit(...args);
+				});
+			},
+			fn_bind(lock0, "readwrite", async () => {
+				const reflexion1 = () => {
+					const assert_not_used = () => {
+						if(used) assert_not_closed();
+					};
+					let used;
+					const lock0 = lock();
+					return create_reflexion(
+						async (commit, ...args) => {
+							await lock0("readwrite", async () => {
+								assert_not_used();
+								used = true;
+							});
+							commit(ref0, ...args);
+							return reflexion1();
+						},
+						(emit, ...args) => {
+							lock0("readonly", async () => {
+								assert_not_used();
+								await emit(...args);
+							});
+						},
+						() => {},
+					);
 				};
-				let used;
-				const lock0 = lock();
-				const reflexion0 = {};
-				define_commit(reflexion0, async (commit, ...args) => {
-					await lock0("readwrite", async () => {
-						assert_not_used();
-						used = true;
-					});
-					commit(ref0, ...args);
-					return reflexion1();
-				});
-				define_emit(reflexion0, (emit, ...args) => {
-					lock0("readonly", async () => {
-						assert_not_used();
-						await emit(...args);
-					});
-				});
-				reflexion0.close = () => {};
-				return reflexion0;
-			};
-			if(closed === (closed = true)) return forked ? reflexion(ref0, forked) : reflexion1();
-		});
-		return reflexion0;
+				if(closed === (closed = true)) return forked ? reflexion(ref0, forked) : reflexion1();
+			}),
+		);
 	};
 	const reflexion0 = reflexion();
 	Reflect.deleteProperty(reflexion0, "close");
