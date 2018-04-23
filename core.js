@@ -205,7 +205,7 @@ const threads = () => {
 
 const is_object = a => Object(a) === a;
 
-const is_list = defer(() => {
+const is_list = (() => {
 	const threads0 = threads;
 	const cache = new WeakMap;
 	return a => is_object(a) ? threads(a, async () => {
@@ -222,7 +222,7 @@ const is_list = defer(() => {
 		cache.set(a, is_list);
 		return is_list;
 	}) : false;
-});
+})();
 
 const [
 	is_string,
@@ -241,47 +241,56 @@ const is_buffer = a => {
 	}
 };
 
-const list = () => {
-	const key = Symbol.asyncIterator;
-	const [returns, resolve] = async();
-	const entry = lazy(() => {
-		const thread0 = thread();
-		let resolve0;
-		const [entry] = [, resolve0] = async();
-		resolve([
-			async value => {
-				const resolve1 = resolve0;
-				const [next] = [, resolve0] = async();
-				const [async0, resolve] = async();
-				resolve1([lazy(() => {
-					resolve();
-					return next;
-				}), (async () => list_clone(await value))()]);
-				await async0;
-			},
-			() => resolve0(),
-			reason => resolve0((async () => {
-				throw reason;
-			})()),
-		].map(fn => fn_bind(thread0, fn)));
-		return entry;
-	});
-	return [{[key]: () => {
-		let cursor = entry;
-		const iter = {
-			[key]: () => iter,
-			next: fn_bind(thread(), async () => {
-				if(cursor){
-					const cursor0 = cursor;
-					cursor = null;
-					cursor = await cursor0();
-				}
-				return cursor ? {done: false, value: ([cursor] = cursor)[1]} : {done: true};
-			}),
-		};
-		return iter;
-	}}, returns];
-};
+const [list, list_clone] = (() => {
+	const lists = new WeakSet;
+	return [
+		() => {
+			const key = Symbol.asyncIterator;
+			const [returns, resolve] = async();
+			const entry = lazy(() => {
+				const thread0 = thread();
+				let resolve0;
+				const [entry] = [, resolve0] = async();
+				resolve([
+					async value => {
+						const resolve1 = resolve0;
+						const [next] = [, resolve0] = async();
+						const [async0, resolve] = async();
+						resolve1([lazy(() => {
+							resolve();
+							return next;
+						}), (async () => list_clone(await value))()]);
+						await async0;
+					},
+					() => resolve0(),
+					reason => resolve0((async () => {
+						throw reason;
+					})()),
+				].map(fn => fn_bind(thread0, fn)));
+				return entry;
+			});
+			const list = {};
+			Reflect.defineProperty(list, key, {value: () => {
+				let cursor = entry;
+				const iter = {
+					[key]: () => iter,
+					next: fn_bind(thread(), async () => {
+						if(cursor){
+							const cursor0 = cursor;
+							cursor = null;
+							cursor = await cursor0();
+						}
+						return cursor ? {done: false, value: ([cursor] = cursor)[1]} : {done: true};
+					}),
+				};
+				return iter;
+			}});
+			lists.add(list);
+			return [list, returns];
+		},
+		list => lists.has(list) ? list : list_flat_map(value, list),
+	];
+})();
 
 const fn_to_list = (fn, ...args) => {
 	const [list0, returns0] = list();
@@ -297,7 +306,7 @@ const list_concat = fn_bind(fn_to_list, async (append, lists) => {
 });
 
 const list_to_array = async list => {
-	if(!await (await is_list)(list)) return list;
+	if(!await is_list(list)) return list;
 	const array = [];
 	for await(let a of list) array.push((async () => list_to_array(await a))());
 	return Promise.all(array);
@@ -307,9 +316,7 @@ const list_map = fn_bind(fn_to_list, async (append, fn, list) => {
 	for await(let a of list) await append((async () => fn(await a))());
 });
 
-const list_flat_map = async (fn, list) => await (await is_list)(list) ? list_map(fn_bind(list_flat_map, fn), list) : fn(list);
-
-const list_clone = fn_bind(list_flat_map, value);
+const list_flat_map = async (fn, list) => await is_list(list) ? list_map(fn_bind(list_flat_map, fn), list) : fn(list);
 
 const list_next = async list0 => {
 	const list = (async function*(){
@@ -320,7 +327,7 @@ const list_next = async list0 => {
 };
 
 const list_flatten = fn_bind(fn_to_list, async (append, begin, end, list) => {
-	if(!await (await is_list)(list)) return append(list);
+	if(!await is_list(list)) return append(list);
 	for await(let a of list_concat([[begin], list_concat(list_map(fn_bind(list_flatten, begin, end), list)), [end]])) await append(a);
 });
 
@@ -464,14 +471,14 @@ const big_int_to_uint = fn_bind(fn_to_list, async (append, big_int) => {
 const buffer_to_binary = buffer => string_concat(list_map(String.fromCodePoint, new Uint8Array(buffer)));
 
 const list_normalize = async list => {
-	if(await (await is_list)(list)) return list_map(list_normalize, list);
+	if(await is_list(list)) return list_map(list_normalize, list);
 	if(is_buffer(list)) return buffer_to_binary(list);
 	if(is_string(list)) return buffer_to_binary(await string_to_utf8(list));
 	if(is_big_int(list)) return list_map(buffer_to_binary, big_int_to_uint(list));
 	return list;
 };
 
-const reflexion = defer(() => {
+const reflexion = (() => {
 	const list_enum = (list0, exit0) => {
 		list0 = (async () => list_clone(await list0))();
 		return async method => {
@@ -479,7 +486,7 @@ const reflexion = defer(() => {
 				case "next":
 				return [exit0, list0];
 				case "enter":
-				if(await (await is_list)(list0)) return [async method => {
+				if(await is_list(list0)) return [async method => {
 					if(method === "exit") return [exit0];
 					const [value, list] = await list_next(await list0);
 					const exit = fn_bind(defer, defer(async () => (await list_enum(list || [], exit0)("enter"))[0]));
@@ -765,7 +772,7 @@ const reflexion = defer(() => {
 	const reflexion0 = reflexion();
 	Reflect.deleteProperty(reflexion0, "close");
 	return reflexion0;
-});
+})();
 
 const buffer_random = () => 
 
