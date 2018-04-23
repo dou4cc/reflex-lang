@@ -230,6 +230,8 @@ const [
 	"bigint",
 ].map(macro => a => typeof a === macro);
 
+const is_param = a => is_string(a) && /^\$*$/u.test(a);
+
 const is_buffer = a => {
 	try{
 		Reflect.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get.call(a);
@@ -286,7 +288,7 @@ const [list, list_clone] = (() => {
 			lists.add(list);
 			return [list, returns];
 		},
-		list => lists.has(list) ? list : list_flat_map(value, list),
+		async list => lists.has(list) || !await is_list(list) ? list : list_map(list_clone, list),
 	];
 })();
 
@@ -772,24 +774,9 @@ const reflexion = (() => {
 	return reflexion0;
 })();
 
-const buffer_random = () => 
-
-const buffer_fn = f => (...buffers) => f(...buffers.map(buffer => new Uint8Array(buffer))).buffer;
-
-const str2utf8 = string => new Uint8Array([].concat(...Array.from(string).map(a => {
-	const f = (a, i) => i ? f(a >> 6, i - 1).concat(0x80 | a & 0x3f) : [];
-	a = a.codePointAt();
-	if(a < 0x80) return [a];
-	const list = f(a, a = Math.floor(Math.log2(a) / 6) + 1);
-	list[0] |= ~(1 << 8 - a) + 1;
-	return list;
-}))).buffer;
-
-const str2bin = string => buffer2bin(str2utf8(string));
+const buffer_random = () => numbers_to_buffer([Math.random() * 0x100]);
 
 const bin2buffer = binary => new Uint8Array(Array.from(binary).map(a => a.codePointAt())).buffer;
-
-const is_param = a => is_str(a) && /^\$*$/u.test(a);
 
 const vm_min = () => {
 	const serialize1 = (...list) => {
