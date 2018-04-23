@@ -446,7 +446,7 @@ const string_to_utf8 = async string => numbers_to_buffer(list_concat(list_map(a 
 	bytes.reverse();
 	bytes[0] |= ~(1 << 8 - a) + 1;
 	return bytes;
-}, [...string])));
+}, Object(string))));
 
 const big_int_to_uint = fn_bind(fn_to_list, async (append, big_int) => {
 	const write = byte => append(numbers_to_buffer([Number(byte)]));
