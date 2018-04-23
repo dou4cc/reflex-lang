@@ -125,9 +125,11 @@ const thread = () => {
 	})();
 	const init = once(queue.next());
 	return async (...args) => {
-		await init();
 		const [async0, ...returns] = async();
-		await queue.next(() => call(...args).then(...returns));
+		await Promise.all([
+			init(),
+			queue.next(() => call(...args).then(...returns)),
+		]);
 		return async0;
 	};
 };
