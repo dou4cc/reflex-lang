@@ -1,4 +1,4 @@
-//ES2018
+//ES2018 with BigInt
 
 "use strict";
 
@@ -76,31 +76,6 @@ const catch_all = async (...args) => {
 		return await call(...args);
 	}catch(error){
 		(await throw_call_stack_error)(error);
-	}
-};
-
-const is_object = a => Object(a) === a;
-
-const is_list = async a => is_object(a) && Boolean(await catch_all(() => {
-	for(let iter of [
-		"asyncIterator",
-		"iterator",
-	]){
-		iter = a[Symbol[iter]];
-		if(iter != null) return is_object(Function.prototype.call.call(iter, a));
-	}
-}));
-
-const is_string = a => typeof a === "string";
-
-const is_big_int = a => typeof a === "bigint";
-
-const is_buffer = a => {
-	try{
-		Reflect.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get.call(a);
-		return new Uint8Array(a).buffer;
-	}catch(error){
-		if(!(error instanceof TypeError)) throw error;
 	}
 };
 
@@ -228,6 +203,40 @@ const threads = () => {
 	});
 };
 
+const is_object = a => Object(a) === a;
+
+const is_list = defer(() => {
+	const threads0 = threads;
+	const cache = new WeakMap;
+	return a => is_object(a) ? threads(a, async () => {
+		if(cache.has(a)) return cache.get(a);
+		const is_list = Boolean(await catch_all(() => {
+			for(let iter of [
+				"asyncIterator",
+				"iterator",
+			]){
+				iter = a[Symbol[iter]];
+				if(iter != null) return is_object(Function.prototype.call.call(iter, a));
+			}
+		}));
+		cache.set(a, is_list);
+		return is_list;
+	}) : false;
+});
+
+const is_string = a => typeof a === "string";
+
+const is_big_int = a => typeof a === "bigint";
+
+const is_buffer = a => {
+	try{
+		Reflect.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get.call(a);
+		return new Uint8Array(a).buffer;
+	}catch(error){
+		if(!(error instanceof TypeError)) throw error;
+	}
+};
+
 const list = () => {
 	const key = Symbol.asyncIterator;
 	const [returns, resolve] = async();
@@ -284,7 +293,7 @@ const list_concat = fn_bind(fn_to_list, async (append, lists) => {
 });
 
 const list_to_array = async list => {
-	if(!await is_list(list)) return list;
+	if(!await (await is_list)(list)) return list;
 	const array = [];
 	for await(let a of list) array.push((async () => list_to_array(await a))());
 	return Promise.all(array);
@@ -294,7 +303,7 @@ const list_map = fn_bind(fn_to_list, async (append, fn, list) => {
 	for await(let a of list) await append((async () => fn(await a))());
 });
 
-const list_flat_map = async (fn, list) => await is_list(list) ? list_map(fn_bind(list_flat_map, fn), list) : fn(list);
+const list_flat_map = async (fn, list) => await (await is_list)(list) ? list_map(fn_bind(list_flat_map, fn), list) : fn(list);
 
 const list_clone = fn_bind(list_flat_map, value);
 
@@ -307,7 +316,7 @@ const list_next = async list0 => {
 };
 
 const list_flatten = fn_bind(fn_to_list, async (append, begin, end, list) => {
-	if(!await is_list(list)) return append(list);
+	if(!await (await is_list)(list)) return append(list);
 	for await(let a of list_concat([[begin], list_concat(list_map(fn_bind(list_flatten, begin, end), list)), [end]])) await append(a);
 });
 
@@ -451,7 +460,7 @@ const big_int_to_uint = fn_bind(fn_to_list, async (append, big_int) => {
 const buffer_to_binary = buffer => string_concat(list_map(String.fromCodePoint, new Uint8Array(buffer)));
 
 const list_normalize = async list => {
-	if(await is_list(list)) return list_map(list_normalize, list);
+	if(await (await is_list)(list)) return list_map(list_normalize, list);
 	if(is_buffer(list)) return buffer_to_binary(list);
 	if(is_string(list)) return buffer_to_binary(await string_to_utf8(list));
 	if(is_big_int(list)) return list_map(buffer_to_binary, big_int_to_uint(list));
@@ -459,22 +468,28 @@ const list_normalize = async list => {
 };
 
 const reflexion = defer(() => {
-	const list_enum = (list, exit0) => {
-		const list0 = (async () => await is_list(list) && list_clone(list))();
-		return async method => method === "enter" && await list0 ? [async method => {
-			if(method === "exit") return [exit0];
-			const [value, list] = await list_next(await list0);
-			const exit = fn_bind(defer, defer(async () => (await list_enum(list || [], exit0)("enter"))[0]));
+	const list_enum = (list0, exit0) => {
+		list0 = list_clone(list0);
+		return async method => {
 			switch(method){
-				case "done":
-				return [exit, !list];
-				case "enter":
-				return list_enum(await value, exit)("enter");
 				case "next":
-				return [exit, list ? await value : Symbol()];
+				return [exit0, list0];
+				case "enter":
+				if(await (await is_list)(list0)) return [async method => {
+					if(method === "exit") return [exit0];
+					const [value, list] = await list_next(await list0);
+					const exit = fn_bind(defer, defer(async () => (await list_enum(list || [], exit0)("enter"))[0]));
+					switch(method){
+						case "done":
+						return [exit, !list];
+						case "next":
+						if(!list) return [exit, Symbol()];
+					}
+					return list_enum(await value, exit)(method);
+				}];
 			}
 			return [];
-		}] : [];
+		};
 	};
 	const node = (node0, free = () => {}) => {
 		const count = node => node.values_count + node.children_count;
@@ -534,15 +549,8 @@ const reflexion = defer(() => {
 		const placeholder = Symbol();
 		const methods = [...node0.methods];
 		let {values_count = 0, children_count = 0} = node0;
-		const [
-			lock0,
-			values_lock,
-			children_lock,
-		] = gen(lock);
-		const [
-			values_mutex,
-			children_mutex,
-		] = gen(mutex);
+		const [lock0, values_lock, children_lock] = gen(lock);
+		const [values_mutex, children_mutex] = gen(mutex);
 		const values = {};
 		values.threads = threads();
 		[values.black, values.white] = gen(() => new Set);
@@ -614,19 +622,17 @@ const reflexion = defer(() => {
 			for_each: (cursor0 = placeholder, fn) => {
 				if(cursor0 === placeholder) return (async () => {
 					const [async0, ...returns] = async();
-					const [resolve] = returns;
 					await lock0("readonly", () => {
 						values_mutex[2](async () => {
 							await atom_lock(values_lock, 1, async mode => {
 								if(!values_count) return;
 								await mode(0);
 								const [async0, ...returns] = async();
-								const [resolve] = returns;
 								call(node0.for_each, entry, value => {
 									try{
 										if(!values.black.has(value)) values.white.add(value);
 									}catch(error){
-										resolve((async () => {
+										returns[0]((async () => {
 											throw error;
 										})());
 									}
@@ -636,7 +642,7 @@ const reflexion = defer(() => {
 								sweep();
 							});
 							const values0 = [...values.white];
-							resolve(defer(async () => {
+							returns[0](defer(async () => {
 								try{
 									await list_to_array(list_map(value => defer(fn, value), values0));
 								}catch(_){}
@@ -648,7 +654,7 @@ const reflexion = defer(() => {
 				lock0("readonly", () => {
 					children_mutex[2](list_to_array, list_map(fn_bind(defer, async method => {
 						const [cursor, key] = await cursor0(method);
-						const child0 = await child(method, key);
+						const child0 = await child(method, await key);
 						if(child0) child0.for_each(cursor, fn);
 					}), methods));
 				});
