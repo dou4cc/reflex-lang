@@ -224,9 +224,13 @@ const is_list = defer(() => {
 	}) : false;
 });
 
-const is_string = a => typeof a === "string";
-
-const is_big_int = a => typeof a === "bigint";
+const [
+	is_string,
+	is_big_int,
+] = [
+	"string",
+	"bigint",
+].map(macro => a => typeof a === macro);
 
 const is_buffer = a => {
 	try{
