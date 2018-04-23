@@ -209,8 +209,7 @@ const is_list = (() => {
 	const threads0 = threads;
 	const cache = new WeakMap;
 	return a => is_object(a) ? threads(a, async () => {
-		if(cache.has(a)) return cache.get(a);
-		const is_list = Boolean(await catch_all(() => {
+		if(!cache.has(a)) cache.set(a, Boolean(await catch_all(() => {
 			for(let iter of [
 				"asyncIterator",
 				"iterator",
@@ -218,9 +217,8 @@ const is_list = (() => {
 				iter = a[Symbol[iter]];
 				if(iter != null) return is_object(Function.prototype.call.call(iter, a));
 			}
-		}));
-		cache.set(a, is_list);
-		return is_list;
+		})));
+		return cache.get(a);
 	}) : false;
 })();
 
