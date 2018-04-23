@@ -47,22 +47,23 @@ const throw_unsupported_error = () => {
 	throw new TypeError("Unsupported");
 };
 
-const throw_call_stack_error = defer(() => {
-	const samples = [
+const throw_call_stack_error = defer(async () => {
+	const samples = await Promise.all([
 		() => {
 			const fn = () => !fn();
 			fn();
 		},
-	].map(fn => {
+	].map(fn_bind(defer, fn => {
 		try{
 			fn();
 		}catch(error){
-			return error;
+			return String(error);
 		}
 		throw_unsupported_error();
-	});
+	})));
 	return error => {
-		if(samples.some(sample => [error, sample].map(String).reduce(equal))) throw error;
+		error = String(error);
+		if(samples.some(sample => sample === error)) throw error;
 	};
 });
 
@@ -368,11 +369,17 @@ const strings_normalize = fn_bind(fn_to_list, async (append, strings) => {
 
 const string_concat = async strings => (await list_to_array(strings)).join("");
 
-const hex_to_buffer = hex => new Uint8Array(Array(hex.length / 2)).map((_, i) => {
-	const byte = hex.substr(i * 2, 2);
-	if(/^[\da-f]*$/iu.test(byte)) return Number.parseInt(byte, 16);
-	throw_syntax_error();
-}).buffer;
+const numbers_to_buffer = async numbers => new Uint8Array(await list_to_array(numbers)).buffer;
+
+const hex_to_buffer = hex => numbers_to_buffer(fn_to_list(append => {
+	let i = hex.length;
+	if(i % 2) throw_syntax_error();
+	while(i) append((async () => {
+		const byte = await defer(hex.substring.bind(hex), i, i -= 2);
+		if(/^[\da-f]*$/iu.test(byte)) return Number.parseInt(byte, 16);
+		throw_syntax_error();
+	})());
+}));
 
 const code_to_list = code => {
 	const [begin, end] = gen(Symbol);
@@ -416,7 +423,7 @@ const code_to_list = code => {
 	});
 };
 
-const string_to_utf8 = async string => new Uint8Array(await list_to_array(list_concat(list_map(a => {
+const string_to_utf8 = async string => numbers_to_buffer(list_concat(list_map(a => {
 	a = a.codePointAt();
 	if(a < 0x80) return [a];
 	const bytes = [];
@@ -424,10 +431,10 @@ const string_to_utf8 = async string => new Uint8Array(await list_to_array(list_c
 	bytes.reverse();
 	bytes[0] |= ~(1 << 8 - a) + 1;
 	return bytes;
-}, [...string])))).buffer;
+}, [...string])));
 
 const big_int_to_uint = fn_bind(fn_to_list, async (append, big_int) => {
-	const write = byte => append(new Uint8Array([Number(byte)]).buffer);
+	const write = byte => append(numbers_to_buffer([Number(byte)]));
 	if(big_int < 0n) throw new RangeError("Signed");
 	let last;
 	for(; ; ){
@@ -439,7 +446,7 @@ const big_int_to_uint = fn_bind(fn_to_list, async (append, big_int) => {
 	await write(last);
 });
 
-const buffer_to_binary = buffer => string_concat(list_map(String.fromCodePoint, new Uint8Array(buffer)))
+const buffer_to_binary = buffer => string_concat(list_map(String.fromCodePoint, new Uint8Array(buffer)));
 
 const list_normalize = async list => {
 	if(await is_list(list)) return list_map(list_normalize, list);
