@@ -469,7 +469,7 @@ const list_normalize = async list => {
 
 const reflexion = defer(() => {
 	const list_enum = (list0, exit0) => {
-		list0 = list_clone(list0);
+		list0 = (async () => list_clone(await list0))();
 		return async method => {
 			switch(method){
 				case "next":
@@ -485,7 +485,7 @@ const reflexion = defer(() => {
 						case "next":
 						if(!list) return [exit, Symbol()];
 					}
-					return list_enum(await value, exit)(method);
+					return list_enum(value, exit)(method);
 				}];
 			}
 			return [];
@@ -703,9 +703,9 @@ const reflexion = defer(() => {
 			}
 		}), reflex)));
 		const define_emit = (reflexion, fn) => {
-			reflexion.emit = fn_bind(fn, async message => {
-				message = await list_clone(message);
-				ref0.for_each(list_enum(message), reflex => reflex(reflexion, message));
+			reflexion.emit = fn_bind(fn, message => {
+				message = defer(list_clone, message);
+				ref0.for_each(list_enum(message), async reflex => reflex(reflexion, await message));
 			});
 		};
 		let closed;
