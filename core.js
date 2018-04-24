@@ -243,7 +243,8 @@ const is_buffer = a => {
 	}
 };
 
-const [list, list_clone] = (() => {
+const [is_list, list, list_clone] = (() => {
+	const locks = schedulers(lock);
 	const cache = new WeakMap;
 	const lists = new WeakSet;
 	return [
@@ -597,7 +598,6 @@ const reflexion = () => {
 			values_count,
 			children_count,
 			add: async (cursor, value) => {
-				cursor = defer(list_next, cursor);
 				cursor = capture(defer(list_next, cursor));
 				const [async0, resolve] = async();
 				await lock0("readwrite", async () => {
