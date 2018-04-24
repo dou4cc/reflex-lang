@@ -4,9 +4,28 @@
 
 const equal = (a, b) => [a].includes(b);
 
+const capture = async => {
+	(async () => {
+		try{
+			await async;
+		}catch(_){}
+	})();
+	return async;
+};
+
+const dispatch = async async => {
+	try{
+		await async;
+	}catch(error){
+		(async () => {
+			throw error;
+		})();
+	}
+};
+
 const async = () => {
 	let returns;
-	return [new Promise((...returns1) => returns = returns1), ...returns];
+	return [capture(new Promise((...returns1) => returns = returns1)), ...returns];
 };
 
 const gen = function*(fn){
@@ -37,7 +56,7 @@ const thunk = fn_bind(fn_bind, value);
 
 const lazy = thunk => {
 	const [async0, resolve] = async();
-	return () => {
+	return async () => {
 		resolve({then: resolve => resolve(thunk())});
 		return async0;
 	};
@@ -47,7 +66,7 @@ const throw_unsupported_error = () => {
 	throw new TypeError("Unsupported");
 };
 
-const throw_call_stack_error = defer(async () => {
+const throw_call_stack_error = capture(defer(async () => {
 	const samples = await Promise.all([
 		() => {
 			const fn = () => !fn();
@@ -65,7 +84,7 @@ const throw_call_stack_error = defer(async () => {
 		error = String(error);
 		if(samples.some(sample => sample === error)) throw error;
 	};
-});
+}));
 
 const throw_syntax_error = () => {
 	throw new SyntaxError("Unexpected token");
@@ -79,15 +98,15 @@ const catch_all = async (...args) => {
 	}
 };
 
-const scheduler = (free = () => {}) => {
-	let count = 0;
-	return (fn, ...args) => {
-		const async0 = fn(...args);
+const scheduler = (free, mode = (fn, ...args) => fn(...args)) => {
+	let count = 0n;
+	return (...args) => {
+		count += 1n;
+		const async0 = mode(...args);
 		return (async () => {
 			const [async1, ...returns] = async();
-			count += 1;
 			await (async () => async0)().then(...returns);
-			count -= 1;
+			count -= 1n;
 			defer(free, () => !count);
 			return async1;
 		})();
@@ -98,13 +117,13 @@ const thread = () => {
 	const queue = (async function*(){
 		for(; ; ) await (yield)();
 	})();
-	const init = once(queue.next());
+	const init = once(capture(queue.next()));
 	return async (...args) => {
 		const [async0, ...returns] = async();
-		await Promise.all([
-			init(),
-			queue.next(() => call(...args).then(...returns)),
-		]);
+		for(let async of [
+			defer(init),
+			capture(queue.next(() => call(...args).then(...returns))),
+		]) await async;
 		return async0;
 	};
 };
@@ -117,7 +136,7 @@ const lock = () => {
 			return (async () => {
 				const [async0, ...returns] = async();
 				await thread0(() => {
-					thread1(thunk(call(...args).then(...returns)));
+					thread1(thunk(capture(call(...args).then(...returns))));
 				});
 				return async0;
 			})();
@@ -131,7 +150,7 @@ const lock = () => {
 const mutex = () => {
 	const [thread0, thread1] = gen(thread);
 	let mode;
-	return [
+	return (index, ...args) => [
 		async (...args) => {
 			const [async0, resolve] = async();
 			await thread0(() => resolve(call(...args)));
@@ -141,7 +160,7 @@ const mutex = () => {
 			const [async0, ...returns] = async();
 			await thread0(async () => {
 				if(mode === macro){
-					thread1(thunk(call(...args).then(...returns)));
+					thread1(thunk(capture(call(...args).then(...returns))));
 					return;
 				}
 				const [async0, resolve] = async();
@@ -154,13 +173,13 @@ const mutex = () => {
 			});
 			return async0;
 		}),
-	];
+	][index](...args);
 };
 
 const atom = ([...modes], index0, fn, ...args) => {
 	index0 = Math.min(modes.length - 1, Math.floor(index0));
 	const [async0, ...returns] = async();
-	const async1 = modes[index0](() => {
+	const async1 = modes[index0](async () => {
 		const [async0, resolve] = async();
 		(async () => resolve(await call(fn, index => {
 			if(index >= index0) return;
@@ -185,42 +204,25 @@ const atom_lock = (lock, ...args) => atom([
 	call,
 ], ...args);
 
-const threads = () => {
+const schedulers = mode => {
 	const lock0 = lock();
 	const map = new Map;
 	return fn_bind(lock0, "readwrite", (key, ...args) => {
 		if(!map.has(key)){
-			const thread0 = fn_bind(scheduler(fn_bind(atom_lock, lock0, 2, async (mode, idle) => {
+			const mode0 = scheduler(fn_bind(atom_lock, lock0, 2, async (mode, idle) => {
 				if(!idle()) return;
 				await mode(1);
-				if(map.get(key) !== thread0) return;
+				if(map.get(key) !== mode0) return;
 				await mode(0);
 				map.delete(key);
-			})), thread());
-			map.set(key, thread0);
+			}), mode());
+			map.set(key, mode0);
 		}
 		return map.get(key)(...args);
 	});
 };
 
 const is_object = a => Object(a) === a;
-
-const is_list = (() => {
-	const threads0 = threads;
-	const cache = new WeakMap;
-	return a => is_object(a) ? threads(a, async () => {
-		if(!cache.has(a)) cache.set(a, Boolean(await catch_all(() => {
-			for(let iter of [
-				"asyncIterator",
-				"iterator",
-			]){
-				iter = a[Symbol[iter]];
-				if(iter != null) return is_object(Function.prototype.call.call(iter, a));
-			}
-		})));
-		return cache.get(a);
-	}) : false;
-})();
 
 const [
 	is_string,
@@ -242,8 +244,28 @@ const is_buffer = a => {
 };
 
 const [list, list_clone] = (() => {
+	const cache = new WeakMap;
 	const lists = new WeakSet;
 	return [
+		a => {
+			if(!is_object(a)) return false;
+			if(lists.has(a)) return true;
+			return atom_lock(fn_bind(locks, a), 1, async mode => {
+				if(!cache.has(a)){
+					await mode(0);
+					cache.set(a, Boolean(await catch_all(() => {
+						for(let iter of [
+							"asyncIterator",
+							"iterator",
+						]){
+							iter = a[Symbol[iter]];
+							if(iter != null) return is_object(Function.prototype.call.call(iter, a));
+						}
+					})));
+				}
+				return cache.get(a);
+			});
+		},
 		() => {
 			const key = Symbol.asyncIterator;
 			const [returns, resolve] = async();
@@ -259,7 +281,7 @@ const [list, list_clone] = (() => {
 						resolve1([lazy(() => {
 							resolve();
 							return next;
-						}), (async () => list_clone(await value))()]);
+						}), capture((async () => list_clone(await value))())]);
 						await async0;
 					},
 					() => resolve0(),
@@ -288,7 +310,7 @@ const [list, list_clone] = (() => {
 			lists.add(list);
 			return [list, returns];
 		},
-		async list => lists.has(list) || !await is_list(list) ? list : list_map(list_clone, list),
+		async list => await is_list(list) && !lists.has(list) ? list_map(list_clone, list) : list,
 	];
 })();
 
@@ -308,7 +330,7 @@ const list_concat = fn_bind(fn_to_list, async (append, lists) => {
 const list_to_array = async list => {
 	if(!await is_list(list)) return list;
 	const array = [];
-	for await(let a of list) array.push((async () => list_to_array(await a))());
+	for await(let a of list) array.push(capture((async () => list_to_array(await a))()));
 	return Promise.all(array);
 };
 
@@ -326,29 +348,25 @@ const list_next = async list0 => {
 	return done ? [] : [value(), list_map(call, list)];
 };
 
+const list_trim = (list, rest) => [list, fn_to_list(async append => {
+	for await(let _ of list);
+	for await(let a of rest()) await append(a);
+})];
+
 const list_flatten = fn_bind(fn_to_list, async (append, begin, end, list) => {
 	if(!await is_list(list)) return append(list);
 	for await(let a of list_concat([[begin], list_concat(list_map(fn_bind(list_flatten, begin, end), list)), [end]])) await append(a);
 });
 
-const list_unflatten = (begin, end, list) => {
-	let a = [
-		async append => {
-			if(equal(await ([, list] = await list_next(list))[0], begin)) while(([a, list] = await list_next(list)).length){
-				a = await a;
-				if(equal(a, end)) return;
-				await append(equal(a, begin) ? ([, list] = list_unflatten(begin, end, list_concat([[begin], list])))[0] : a);
-			}
-			throw_syntax_error();
-		},
-		async append => {
-			for await(let _ of list1);
-			for await(let a of list) await append(a);
-		},
-	].map(fn => fn_to_list(fn));
-	const [list1] = a;
-	return a;
-};
+const list_unflatten = (begin, end, list) => list_trim(fn_to_list(async append => {
+	let a;
+	if(equal(await ([, list] = await list_next(list))[0], begin)) while(([a, list] = await list_next(list)).length){
+		a = await a;
+		if(equal(a, end)) return;
+		await append(equal(a, begin) ? ([, list] = list_unflatten(begin, end, list_concat([[begin], list])))[0] : a);
+	}
+	throw_syntax_error();
+}), () => list);
 
 const strings_match = async (regex, strings) => {
 	regex = new RegExp(regex);
@@ -457,6 +475,7 @@ const string_to_utf8 = async string => numbers_to_buffer(list_concat(list_map(a 
 
 const big_int_to_uint = fn_bind(fn_to_list, async (append, big_int) => {
 	const write = byte => append(numbers_to_buffer([Number(byte)]));
+	big_int = BigInt(big_int);
 	if(big_int < 0n) throw new RangeError("Signed");
 	let last;
 	for(; ; ){
@@ -478,9 +497,9 @@ const list_normalize = async list => {
 	return list;
 };
 
-const reflexion = (() => {
+const reflexion = () => {
 	const list_enum = (list0, exit0) => {
-		list0 = (async () => list_clone(await list0))();
+		list0 = capture(async () => list_clone(await list0))();
 		return async method => {
 			switch(method){
 				case "next":
@@ -489,7 +508,7 @@ const reflexion = (() => {
 				if(await is_list(list0)) return [async method => {
 					if(method === "exit") return [exit0];
 					const [value, list] = await list_next(await list0);
-					const exit = fn_bind(defer, defer(async () => (await list_enum(list || [], exit0)("enter"))[0]));
+					const exit = fn_bind(defer, capture(defer(async () => (await list_enum(list || [], exit0)("enter"))[0])));
 					switch(method){
 						case "done":
 						return [exit, !list];
@@ -511,7 +530,7 @@ const reflexion = (() => {
 			child = node(child, async () => {
 				await children_lock("readonly", () => children_count && children.black.add(key));
 				children.white.delete(key);
-				node1.children_count -= 1;
+				node1.children_count -= 1n;
 				await check();
 			});
 			children.white.set(key, child);
@@ -534,7 +553,7 @@ const reflexion = (() => {
 					return false;
 				}
 				values.white.add(value);
-				values_count -= 1;
+				values_count -= 1n;
 				sweep();
 				return true;
 			});
@@ -549,7 +568,7 @@ const reflexion = (() => {
 				const child0 = await node0.child(method, key);
 				if(child0){
 					const child = create_child(children, key, child0);
-					children_count -= 1;
+					children_count -= 1n;
 					sweep();
 					return child;
 				}
@@ -559,14 +578,17 @@ const reflexion = (() => {
 		};
 		const placeholder = Symbol();
 		const methods = [...node0.methods];
-		let {values_count = 0, children_count = 0} = node0;
+		let {
+			values_count = 0n,
+			children_count = 0n,
+		} = node0;
 		const [lock0, values_lock, children_lock] = gen(lock);
 		const [values_mutex, children_mutex] = gen(mutex);
 		const values = {};
-		values.threads = threads();
+		values.threads = schedulers(thread);
 		[values.black, values.white] = gen(() => new Set);
 		const branches = new Map(methods.map(method => [method, {
-			threads: threads(),
+			threads: schedulers(thread),
 			black: new Set,
 			white: new Map,
 		}]));
@@ -576,98 +598,102 @@ const reflexion = (() => {
 			children_count,
 			add: async (cursor, value) => {
 				cursor = defer(list_next, cursor);
+				cursor = capture(defer(list_next, cursor));
 				const [async0, resolve] = async();
 				await lock0("readwrite", async () => {
-					const [branch] = [, cursor] = await cursor;
-					if(!cursor) return resolve(values_mutex[1](values.threads, value, async () => {
-						if(await has(value)) return;
-						node1.values_count += 1;
-						values.white.add(value);
-					}));
-					const [method, key] = await list_to_array(await branch);
-					const children = branches.get(method);
-					resolve(children_mutex[1](children.threads, key, async () => {
-						let child0 = await child(method, key);
-						if(!child0){
-							node1.children_count += 1;
-							child0 = create_child(children, key);
-						}
-						child0.add(cursor, value);
-					}));
+					try{
+						const [branch] = [, cursor] = await cursor;
+						if(!cursor) return resolve(values_mutex(1, values.threads, value, async () => {
+							if(await has(value)) return;
+							node1.values_count += 1n;
+							values.white.add(value);
+						}));
+						const [method, key] = await list_to_array(await branch);
+						const children = branches.get(method);
+						resolve(children_mutex(1, children.threads, key, async () => {
+							let child0 = await child(method, key);
+							if(!child0){
+								node1.children_count += 1n;
+								child0 = create_child(children, key);
+							}
+							const count0 = count(child0);
+							const async = child0.add(cursor, value);
+							if(!count0) await async;
+						}));
+					}catch(error){
+						resolve();
+						await check();
+						throw error;
+					}
 				});
 				await async0;
 			},
 			delete: async (cursor, value) => {
-				cursor = defer(list_next, cursor);
+				cursor = capture(defer(list_next, cursor));
 				const [async0, resolve] = async();
 				await lock0("readwrite", async () => {
 					const [branch] = [, cursor] = await cursor;
-					if(!cursor) resolve(values_mutex[1](values.threads, value, async () => {
+					if(!cursor) resolve(values_mutex(1, values.threads, value, async () => {
 						if(!await has(value)) return;
 						await values_lock("readonly", () => values_count && values.black.add(value));
 						values.white.delete(value);
-						node1.values_count -= 1;
+						node1.values_count -= 1n;
 						await check();
 					}));
 					const [method, key] = await list_to_array(await branch);
-					resolve(children_mutex[1](branches.get(method).threads, key, async () => {
+					resolve(children_mutex(1, branches.get(method).threads, key, async () => {
 						const child0 = await child(method, key);
 						if(!child0) return;
 						const count0 = count(child0);
 						const async = child0.delete(cursor, value);
-						if(count0 <= 1) await async;
+						if(count0 <= 1n) await async;
 					}));
 				});
 				await async0;
 			},
 			has: async value => {
 				const [async0, resolve] = async();
-				await lock0("readonly", () => resolve(values_mutex[0](values.threads, value, has, value)));
+				await lock0("readonly", () => resolve(values_mutex(0, values.threads, value, has, value)));
 				return async0;
 			},
 			child: async (method, key) => {
 				const [async0, resolve] = async();
-				await lock0("readonly", () => resolve(children_mutex[0](branches.get(method).threads, key, child, method, key)));
+				await lock0("readonly", () => resolve(children_mutex(0, branches.get(method).threads, key, child, method, key)));
 				return async0;
 			},
 			for_each: (cursor0 = placeholder, fn) => {
 				if(cursor0 === placeholder) return (async () => {
 					const [async0, ...returns] = async();
 					await lock0("readonly", () => {
-						values_mutex[2](async () => {
+						values_mutex(2, async () => {
 							await atom_lock(values_lock, 1, async mode => {
 								if(!values_count) return;
 								await mode(0);
-								const [async0, ...returns] = async();
-								call(node0.for_each, entry, value => {
+								const [async0, resolve] = async();
+								await node0.for_each(entry, value => {
 									try{
 										if(!values.black.has(value)) values.white.add(value);
 									}catch(error){
-										returns[0]((async () => {
+										resolve((async () => {
 											throw error;
 										})());
 									}
-								}).then(...returns);
+								});
 								await async0;
-								values_count = 0;
+								values_count = 0n;
 								sweep();
 							});
-							const values0 = [...values.white];
-							returns[0](defer(async () => {
-								try{
-									await list_to_array(list_map(value => defer(fn, value), values0));
-								}catch(_){}
-							}));
+							returns[0](defer(list_to_array, list_map(value => dispatch(call(fn, value)), [...values.white])));
 						}).then(...returns);
 					});
 					await async0;
 				})();
 				lock0("readonly", () => {
-					children_mutex[2](list_to_array, list_map(fn_bind(defer, async method => {
+					children_mutex(2, list_to_array, list_map(method => dispatch((async () => {
 						const [cursor, key] = await cursor0(method);
 						const child0 = await child(method, await key);
 						if(child0) child0.for_each(cursor, fn);
-					}), methods));
+					})()), methods));
 				});
 			},
 		};
@@ -769,10 +795,8 @@ const reflexion = (() => {
 			}),
 		);
 	};
-	const reflexion0 = reflexion();
-	if(!Reflect.deleteProperty(reflexion0, "close")) throw_unsupported_error();
-	return reflexion0;
-})();
+	return reflexion();
+};
 
 const buffer_random = () => numbers_to_buffer([Math.random() * 0x100]);
 
