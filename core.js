@@ -671,16 +671,16 @@ const reflexion = () => {
 							await atom_lock(values_lock, 1, async mode => {
 								if(!values_count) return;
 								await mode(0);
-								const [async0, resolve] = async();
-								await node0.for_each(entry, value => {
+								const [async0, ...returns] = async();
+								node0.for_each(entry, value => {
 									try{
 										if(!values.black.has(value)) values.white.add(value);
 									}catch(error){
-										resolve((async () => {
+										returns[0]((async () => {
 											throw error;
 										})());
 									}
-								});
+								}).then(...returns);
 								await async0;
 								values_count = 0n;
 								sweep();
