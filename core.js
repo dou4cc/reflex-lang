@@ -503,6 +503,8 @@ const reflexion = () => {
 		list0 = capture(async () => list_clone(await list0))();
 		return async method => {
 			switch(method){
+				case "done":
+				return [exit0, false];
 				case "next":
 				return [exit0, list0];
 				case "enter":
@@ -510,11 +512,11 @@ const reflexion = () => {
 					if(method === "exit") return [exit0];
 					const [value, list] = await list_next(await list0);
 					const exit = fn_bind(defer, capture(defer(async () => (await list_enum(list || [], exit0)("enter"))[0])));
-					switch(method){
+					if(!list) switch(method){
 						case "done":
 						return [exit, !list];
 						case "next":
-						if(!list) return [exit, Symbol()];
+						return [exit, Symbol()];
 					}
 					return list_enum(value, exit)(method);
 				}];
@@ -740,6 +742,7 @@ const reflexion = () => {
 						: [["next", a]]
 					) await append(branch);
 				}
+				if(matching) await append(["done", false]);
 			}), reflex)));
 			reflexion.emit = fn_bind(emit, message => {
 				message = defer(list_clone, message);
