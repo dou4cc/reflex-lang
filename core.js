@@ -62,34 +62,6 @@ const lazy = thunk => {
 	};
 };
 
-const throw_unsupported_error = () => {
-	throw new TypeError("Unsupported");
-};
-
-const throw_call_stack_error = capture(defer(async () => {
-	const samples = await Promise.all([
-		() => {
-			const fn = () => !fn();
-			fn();
-		},
-	].map(fn_bind(defer, fn => {
-		try{
-			fn();
-		}catch(error){
-			return String(error);
-		}
-		throw_unsupported_error();
-	})));
-	return error => {
-		error = String(error);
-		if(samples.some(sample => sample === error)) throw error;
-	};
-}));
-
-const throw_syntax_error = () => {
-	throw new SyntaxError("Unexpected token");
-};
-
 const catch_all = async (...args) => {
 	try{
 		return await call(...args);
@@ -341,6 +313,34 @@ const list_map = fn_bind(fn_to_list, async (append, fn, list) => {
 
 const list_flat_map = async (fn, list) => await is_list(list) ? list_map(fn_bind(list_flat_map, fn), list) : fn(list);
 
+const throw_unsupported_error = () => {
+	throw new TypeError("Unsupported");
+};
+
+const throw_call_stack_error = capture(defer(async () => {
+	const samples = await list_to_array(list_map(fn => {
+		try{
+			fn();
+		}catch(error){
+			return String(error);
+		}
+		throw_unsupported_error();
+	}, [
+		() => {
+			const fn = () => !fn();
+			fn();
+		},
+	]));
+	return error => {
+		error = String(error);
+		if(samples.some(sample => sample === error)) throw error;
+	};
+}));
+
+const throw_syntax_error = () => {
+	throw new SyntaxError("Unexpected token");
+};
+
 const list_next = async list0 => {
 	const list = (async function*(){
 		for await(let a of list0) yield thunk(a);
@@ -508,7 +508,7 @@ const reflexion = () => {
 				case "next":
 				return [exit0, list0];
 				case "enter":
-				if(await is_list(list0)) return [async method => {
+				if(await is_list(await list0)) return [async method => {
 					if(method === "exit") return [exit0];
 					const [value, list] = await list_next(await list0);
 					const exit = fn_bind(defer, capture(defer(async () => (await list_enum(list || [], exit0)("enter"))[0])));
