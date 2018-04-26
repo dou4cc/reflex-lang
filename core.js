@@ -14,18 +14,37 @@ const capture = async => {
 };
 
 const dispatch = async async => {
+	(async () => async)();
 	try{
 		await async;
-	}catch(error){
-		(async () => {
-			throw error;
-		})();
-	}
+	}catch(_){}
 };
 
 const async = () => {
-	let returns;
-	return [capture(new Promise((...returns1) => returns = returns1)), ...returns];
+	const async = () => {
+		let returns;
+		return [new Promise((...returns1) => returns = returns1), ...returns];
+	};
+	const queue = (async function*(){
+		let i, value;
+		[i, value] = yield;
+		for(; ; ){
+			[i, value] = yield array[i](value);
+			array = async();
+			array[1] = () => {};
+		}
+		
+	})();
+	queue.next();
+	let array = async();
+	array[0] = capture(array[0]);
+	for(let i = array.length; i; i -= 1){
+		const fn = array[i];
+		array[i] = value => {
+			queue.next([i, value]);
+		};
+	}
+	return array;
 };
 
 const gen = function*(fn){
@@ -39,16 +58,6 @@ const call = async (fn, ...args) => fn(...args);
 const defer = async (fn, ...args) => (await fn)(...args);
 
 const fn_bind = (fn, ...args0) => (...args1) => fn(...args0, ...args1);
-
-const once = value => {
-	const queue = (function*(){
-		yield value;
-	})();
-	return () => {
-		const {done, value} = queue.next();
-		if(!done) return value;
-	};
-};
 
 const value = value => value;
 
@@ -89,13 +98,10 @@ const thread = () => {
 	const queue = (async function*(){
 		for(; ; ) await (yield)();
 	})();
-	const init = once(capture(queue.next()));
+	queue.next();
 	return async (...args) => {
 		const [async0, ...returns] = async();
-		for(let async of [
-			defer(init),
-			capture(queue.next(() => call(...args).then(...returns))),
-		]) await async;
+		await queue.next(() => call(...args).then(...returns));
 		return async0;
 	};
 };
