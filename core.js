@@ -26,10 +26,9 @@ const async = () => {
 		return [new Promise((...returns1) => returns = returns1), ...returns];
 	};
 	const queue = (function*(){
-		let sent = yield;
 		for(; ; ){
-			const [index, ...args] = sent;
-			sent = yield returns[index](...args);
+			const [index, ...args] = yield;
+			returns[index](...args);
 			[, ...returns] = async();
 			returns[0] = () => {};
 		}
@@ -499,7 +498,7 @@ const list_normalize = async list => {
 	return list;
 };
 
-const reflexion = () => {
+const reflexion = (extension = value) => {
 	const list_enum = (list0, exit0) => {
 		list0 = capture(async () => list_clone(await list0))();
 		return async method => {
@@ -708,11 +707,11 @@ const reflexion = () => {
 		"enter",
 		"exit",
 		"next",
-	]}), forked) => {
+	]}), shared) => {
 		const assert_not_closed = () => {
 			if(closed) throw new TypeError("Closed");
 		};
-		const create_reflexion = (commit, emit, close) => {
+		const create_reflexion = (commit, emit, emit_all, close) => {
 			const reflexion = {};
 			[
 				["on", "add"],
@@ -745,12 +744,12 @@ const reflexion = () => {
 				}
 				if(matching) await append(["done", false]);
 			}), reflex)));
-			reflexion.emit = fn_bind(emit, message => {
+			reflexion.emit = fn_bind(emit, emit = message => {
 				message = defer(list_clone, message);
 				ref0.for_each(list_enum(message), async reflex => reflex(reflexion, await message));
 			});
 			reflexion.close = close;
-			return reflexion;
+			return extension(reflexion);
 		};
 		let closed;
 		const lock0 = lock();
@@ -758,44 +757,50 @@ const reflexion = () => {
 			async (commit, ...args) => {
 				await lock0("readonly", () => {
 					assert_not_closed();
-					forked = true;
+					shared = true;
 				});
 				const ref = node(ref0);
 				await commit(ref, ...args);
 				return reflexion(ref);
 			},
-			(emit, ...args) => {
-				lock0("readonly", async () => {
-					assert_not_closed();
-					await emit(...args);
-				});
-			},
+			fn_bind(lock0, "readonly", (...args) => {
+				assert_not_closed();
+				(shared ? defer : call)(...args);
+			}),
+			fn_bind(lock0, "readonly", (...args) => {
+				assert_not_closed();
+				shared = true;
+				defer(...args);
+			}),
 			fn_bind(lock0, "readwrite", async () => {
-				const reflexion1 = () => {
-					const assert_not_used = () => {
-						if(used) assert_not_closed();
-					};
-					let used;
-					const lock0 = lock();
-					return create_reflexion(
-						async (commit, ...args) => {
-							await lock0("readwrite", async () => {
-								assert_not_used();
-								used = true;
-							});
-							commit(ref0, ...args);
-							return reflexion1();
-						},
-						(emit, ...args) => {
-							lock0("readonly", async () => {
-								assert_not_used();
-								await emit(...args);
-							});
-						},
-						() => {},
-					);
+				const assert_not_used = () => {
+					if(used) assert_not_closed();
 				};
-				if(closed === (closed = true)) return forked ? reflexion(ref0, forked) : reflexion1();
+				if(shared) return reflexion(ref0, shared);
+				if(closed) return;
+				let used;
+				const lock0 = lock();
+				closed = true;
+				return create_reflexion(
+					async (commit, ...args) => {
+						await lock0("readwrite", async () => {
+							assert_not_used();
+							used = true;
+						});
+						commit(ref0, ...args);
+						return reflexion(ref0, shared);
+					},
+					fn_bind(lock0, "readonly", (...args) => {
+						assert_not_used();
+						(shared ? defer : call)(...args);
+					}),
+					fn_bind(lock0, "readonly", (...args) => {
+						assert_not_used();
+						shared = true;
+						defer(...args);
+					}),
+					() => {},
+				);
 			}),
 		);
 	};
