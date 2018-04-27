@@ -751,7 +751,7 @@ const reflexion = (extension = value) => {
 				ref0.for_each(list_enum(message), async reflex => reflex(reflexion, await message));
 			});
 			reflexion.emit_all = fn_bind(emit_all, async messages => {
-				for await(let async of list_map(emit, messages)) (async () => async)();
+				for await(let message of messages) (async () => emit(await message))();
 			});
 			reflexion.close = close;
 			return extension(reflexion);
