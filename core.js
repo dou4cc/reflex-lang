@@ -712,8 +712,8 @@ const reflexion = (extension = value) => {
 				({values_count, children_count} = node0);
 				init();
 			})());
-			lock0("readwrite", thunk0);
 			node1.mutex(1, thunk0);
+			lock0("readwrite", thunk0);
 		}else{
 			init();
 		}
