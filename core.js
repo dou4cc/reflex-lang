@@ -26,10 +26,10 @@ const async = () => {
 		return [new Promise((...returns1) => returns = returns1), ...returns];
 	};
 	const queue = (function*(){
-		let message = yield;
+		let sent = yield;
 		for(; ; ){
-			const [index, ...args] = message;
-			message = yield returns[index](...args);
+			const [index, ...args] = sent;
+			sent = yield returns[index](...args);
 			[, ...returns] = async();
 			returns[0] = () => {};
 		}
