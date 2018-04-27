@@ -25,26 +25,21 @@ const async = () => {
 		let returns;
 		return [new Promise((...returns1) => returns = returns1), ...returns];
 	};
-	const queue = (async function*(){
-		let i, value;
-		[i, value] = yield;
+	const queue = (function*(){
+		let message = yield;
 		for(; ; ){
-			[i, value] = yield array[i](value);
-			array = async();
-			array[1] = () => {};
+			const [index, ...args] = message;
+			message = yield returns[index](...args);
+			[, ...returns] = async();
+			returns[0] = () => {};
 		}
-		
 	})();
 	queue.next();
-	let array = async();
-	array[0] = capture(array[0]);
-	for(let i = array.length; i; i -= 1){
-		const fn = array[i];
-		array[i] = value => {
-			queue.next([i, value]);
-		};
-	}
-	return array;
+	let returns;
+	return [
+		capture(([, ...returns] = async())[0]),
+		...returns.map((_, i) => (...args) => queue.next([i, ...args]).value),
+	];
 };
 
 const gen = function*(fn){
