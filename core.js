@@ -781,8 +781,8 @@ const reflexion = (extension = value) => {
 				const assert_not_used = () => {
 					if(used) assert_not_closed();
 				};
-				if(shared) return reflexion(ref0, shared);
 				if(closed) return;
+				if(shared) return reflexion(ref0, shared);
 				let used;
 				const lock0 = lock();
 				closed = true;
