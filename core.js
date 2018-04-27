@@ -792,7 +792,7 @@ const reflexion = (extension = value) => {
 							assert_not_used();
 							used = true;
 						});
-						commit(ref0, ...args);
+						await commit(ref0, ...args);
 						return reflexion(ref0, shared);
 					},
 					fn_bind(lock0, "readonly", (...args) => {
