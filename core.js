@@ -709,10 +709,7 @@ const reflexion = (extension = value) => {
 					await hang;
 				});
 				await async0;
-				({
-					values_count,
-					children_count,
-				} = node0);
+				({values_count, children_count} = node0);
 				init();
 			})());
 			lock0("readwrite", thunk0);
