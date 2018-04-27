@@ -37,7 +37,9 @@ const async = () => {
 	let returns;
 	return [
 		capture(([, ...returns] = async())[0]),
-		...returns.map((_, i) => (...args) => queue.next([i, ...args]).value),
+		...returns.map((_, i) => (...args) => {
+			queue.next([i, ...args]);
+		}),
 	];
 };
 
@@ -747,6 +749,9 @@ const reflexion = (extension = value) => {
 			reflexion.emit = fn_bind(emit, emit = message => {
 				message = defer(list_clone, message);
 				ref0.for_each(list_enum(message), async reflex => reflex(reflexion, await message));
+			});
+			reflexion.emit_all = fn_bind(emit_all, async messages => {
+				for await(let a of list_map(emit, messages)) (async () => a)();
 			});
 			reflexion.close = close;
 			return extension(reflexion);
