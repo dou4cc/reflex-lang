@@ -516,7 +516,7 @@ const list_normalize = (() => {
 
 const reflexion = (extension = value) => {
 	const list_enum = (list0, exit0) => {
-		list0 = capture(async () => list_clone(await list0))();
+		list0 = capture((async () => list_clone(await list0))());
 		return async method => {
 			switch(method){
 				case "done":
