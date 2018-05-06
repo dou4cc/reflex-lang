@@ -75,6 +75,19 @@ const catch_all = async (...args) => {
 	}
 };
 
+const number_from = number => 1 * number;
+
+const string_from = string => String.prototype.slice.call(string);
+
+const big_int_from = big_int => 1n * big_int;
+
+const buffer_from = buffer => ArrayBuffer.prototype.slice.call(buffer);
+
+const regex_from = regex => {
+	RegExp.prototype.test.call(regex);
+	return new RegExp(regex);
+};
+
 const scheduler = (free, mode = (fn, ...args) => fn(...args)) => {
 	let count = 0n;
 	return (...args) => {
@@ -105,7 +118,7 @@ const thread = () => {
 const lock = () => {
 	const [thread0, thread1] = gen(thread);
 	return (mode, ...args) => {
-		switch(mode){
+		switch(string_from(mode)){
 			case "readonly":
 			return (async () => {
 				const [async0, ...returns] = async();
@@ -147,7 +160,7 @@ const mutex = () => {
 			});
 			return async0;
 		}),
-	][index](...args);
+	][number_from(index)](...args);
 };
 
 const atom = ([...modes], index0, fn, ...args) => {
@@ -208,14 +221,7 @@ const [
 
 const is_param = a => is_string(a) && /^\$*$/u.test(a);
 
-const is_buffer = a => {
-	try{
-		Reflect.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get.call(a);
-		return new Uint8Array(a).buffer;
-	}catch(error){
-		if(!(error instanceof TypeError)) throw error;
-	}
-};
+const is_buffer = async a => Boolean(await catch_all(() => buffer_from(a)));
 
 const [is_list, list, list_clone] = (() => {
 	const locks = schedulers(lock);
@@ -351,7 +357,7 @@ const list_next = async list0 => {
 	return done ? [] : [value(), list_map(call, list)];
 };
 
-const list_trim = (list, rest) => [list, fn_to_list(async append => {
+const list_parse = (list, rest) => [list, fn_to_list(async append => {
 	for await(let _ of list);
 	for await(let a of rest()) await append(a);
 })];
@@ -361,30 +367,35 @@ const list_flatten = fn_bind(fn_to_list, async (append, begin, end, list) => {
 	for await(let a of list_concat([[begin], list_concat(list_map(fn_bind(list_flatten, begin, end), list)), [end]])) await append(a);
 });
 
-const list_unflatten = (begin, end, list) => list_trim(fn_to_list(async append => {
-	let a;
-	if(equal(await ([, list] = await list_next(list))[0], begin)) while(([a, list] = await list_next(list)).length){
-		a = await a;
-		if(equal(a, end)) return;
-		await append(equal(a, begin) ? ([, list] = list_unflatten(begin, end, list_concat([[begin], list])))[0] : a);
+const list_unflatten = (begin, end, list) => list_parse(fn_to_list(async append => {
+	if(equal(await ([, list] = await list_next(list))[0], begin)) for(; ; ){
+		const [value] = [, list] = await list_next(list);
+		if(!list) break;
+		value = await value;
+		if(equal(value, end)) return;
+		await append(equal(value, begin) ? ([, list] = list_unflatten(begin, end, list_concat([[begin], list])))[0] : value);
 	}
 	throw_syntax_error();
 }), () => list);
 
 const strings_match = async (regex, strings) => {
-	regex = new RegExp(regex);
+	regex = regex_from(regex);
 	let string = "";
 	let $;
 	while(!($ = regex.exec(string))){
 		const [value] = [, strings] = await list_next(strings);
-		if(!strings) return null;
+		if(!strings) return [];
 		string += await value;
 	}
 	return [list_concat([[string.slice(regex.lastIndex)], strings]), ...$];
 };
 
-const strings_match_all = fn_bind(fn_to_list, async (append, regex, cursor) => {
-	while(cursor = await strings_match(regex, cursor)) await append(([cursor] = cursor).slice(1));
+const strings_match_all = fn_bind(fn_to_list, async (append, regex, strings) => {
+	for(; ; ){
+		const [, ...$] = [strings] = await strings_match(regex, strings);
+		if(!strings) break;
+		await append($);
+	}
 });
 
 const strings_normalize = fn_bind(fn_to_list, async (append, strings) => {
@@ -397,13 +408,9 @@ const strings_normalize = fn_bind(fn_to_list, async (append, strings) => {
 	){
 		if(rest){
 			await append(rest);
-			rest = null;
+			rest = "";
 		}
-		string = await string;
-		if(/\0$/u.test(string)){
-			rest = "\0";
-			string = string.slice(0, -1);
-		}
+		[, string, rest] = await string.match(/^([^]*)(\0?)$/u);
 		await append(string);
 		end = string.slice(-1) || end;
 	}
@@ -412,9 +419,12 @@ const strings_normalize = fn_bind(fn_to_list, async (append, strings) => {
 
 const string_concat = async strings => (await list_to_array(strings)).join("");
 
-const numbers_to_buffer = async numbers => new Uint8Array(await list_to_array(numbers)).buffer;
+const numbers_to_buffer = async numbers => Uint8Array.from(await list_to_array(numbers)).buffer;
+
+const buffer_to_numbers = buffer => list_map(value, new Uint8Array(buffer_from(buffer)));
 
 const hex_to_buffer = hex => numbers_to_buffer(fn_to_list(append => {
+	hex = string_from(hex);
 	let i = hex.length;
 	if(i % 2) throw_syntax_error();
 	while(i) append((async () => {
@@ -428,9 +438,10 @@ const code_to_list = code => {
 	const [begin, end] = gen(Symbol);
 	const [list, rest] = list_unflatten(begin, end, list_concat([[begin], fn_to_list(async append => {
 		code = strings_normalize(code);
-		let cursor;
-		while(cursor = await strings_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|[^[#`\s\]]+(?=[[#`\s\]])/gu, code)){
-			const [, token] = [code] = cursor;
+		for(; ; ){
+			const [code1, token] = await strings_match(/`(?:\\`|[^`])*`|#.*(?=\n)|[[\]]|[^[#`\s\]]+(?=[[#`\s\]])/gu, code);
+			if(!code1) break;
+			code = code1;
 			if(!/^#/u.test(token)) await append(defer(() => {
 				if(token === "[") return begin;
 				if(token === "]") return end;
@@ -474,11 +485,11 @@ const string_to_utf8 = async string => numbers_to_buffer(list_concat(list_map(a 
 	bytes.reverse();
 	bytes[0] |= ~(1 << 8 - a) + 1;
 	return bytes;
-}, Object(string))));
+}, Object(string_from(string)))));
 
 const big_int_to_uint = fn_bind(fn_to_list, async (append, big_int) => {
 	const write = byte => append(numbers_to_buffer([Number(byte)]));
-	big_int = BigInt(big_int);
+	big_int = big_int_from(big_int);
 	if(big_int < 0n) throw new RangeError("Signed");
 	let last;
 	for(; ; ){
@@ -490,15 +501,18 @@ const big_int_to_uint = fn_bind(fn_to_list, async (append, big_int) => {
 	await write(last);
 });
 
-const buffer_to_binary = buffer => string_concat(list_map(String.fromCodePoint, new Uint8Array(buffer)));
+const buffer_to_binary = buffer => string_concat(list_map(String.fromCodePoint, buffer_to_numbers(buffer)));
 
-const list_normalize = async list => {
-	if(await is_list(list)) return list_map(list_normalize, list);
-	if(is_buffer(list)) return buffer_to_binary(list);
-	if(is_string(list)) return buffer_to_binary(await string_to_utf8(list));
-	if(is_big_int(list)) return list_map(buffer_to_binary, big_int_to_uint(list));
-	return list;
-};
+const list_normalize = (() => {
+	const lists = new WeakSet;
+	return async list => {
+		if(lists.has(list) || !await is_list(list)) return list;
+		const [first, rest] = await list_next(list);
+		list = !rest || (await list_next(rest))[1] ? list_map(list_normalize, list) : list_normalize(await first);
+		lists.add(list);
+		return list;
+	};
+})();
 
 const reflexion = (extension = value) => {
 	const list_enum = (list0, exit0) => {
@@ -508,11 +522,11 @@ const reflexion = (extension = value) => {
 				case "done":
 				return [exit0, false];
 				case "next":
-				return [exit0, list0];
+				return [exit0, capture(((async () => list_normalize(await list0)))())];
 				case "enter":
-				if(await is_list(await list0)) return [async method => {
+				return [async method => {
 					if(method === "exit") return [exit0];
-					const [value, list] = await list_next(await list0);
+					const [value, list] = await is_list(await list0) ? await list_next(await list0) : [list0, []];
 					const exit = fn_bind(defer, capture(defer(async () => (await list_enum(list || [], exit0)("enter"))[0])));
 					if(!list) switch(method){
 						case "done":
@@ -736,7 +750,7 @@ const reflexion = (extension = value) => {
 			].forEach(macros => reflexion[macros[0]] = fn_bind(commit, async (ref, wildcard, pattern, reflex) => ref[macros[1]](fn_to_list(async append => {
 				const [begin, end] = gen(Symbol);
 				let matching;
-				for await(let a of list_flatten(begin, end, pattern)){
+				for await(let a of list_flatten(begin, end, await list_normalize(pattern))){
 					a = await a;
 					if(matching){
 						matching = false;
