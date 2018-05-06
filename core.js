@@ -584,10 +584,10 @@ const reflexion = (extension = value) => {
 		};
 		const child = (method, key) => {
 			const children = branches.get(method);
-			if(children.black.has(key)) return null;
+			if(children.black.has(key)) return;
 			if(children.white.has(key)) return children.white.get(key);
 			return atom_lock(children_lock, 1, async mode => {
-				if(!children_count) return null;
+				if(!children_count) return;
 				await mode(0);
 				const child0 = await node0.child(method, key);
 				if(child0){
