@@ -213,13 +213,18 @@ const schedulers = mode => {
 
 const is_object = a => Object(a) === a;
 
-const [
-	is_string,
-	is_big_int,
-] = [
-	"string",
-	"bigint",
-].map(macro => a => typeof a === macro);
+const [is_string, is_big_int] = [
+	String,
+	BigInt,
+].map(macro => a => {
+	try{
+		macro.prototype.valueOf.call(a);
+	}catch(error){
+		if(!(error instanceof TypeError)) throw error;
+		return false;
+	}
+	return true;
+});
 
 const is_param = a => is_string(a) && /^\$*$/u.test(a);
 
