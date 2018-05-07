@@ -75,13 +75,15 @@ const catch_all = async (...args) => {
 	}
 };
 
-const number_from = number => 1 * number;
+const [number_from, big_int_from] = [
+	1,
+	1n,
+].map(macro => a => macro * a);
 
-const string_from = string => String.prototype.slice.call(string);
-
-const big_int_from = big_int => 1n * big_int;
-
-const buffer_from = buffer => ArrayBuffer.prototype.slice.call(buffer);
+const [string_from, buffer_from] = [
+	String,
+	ArrayBuffer,
+].map(macro => a => macro.prototype.slice.call(a));
 
 const regex_from = regex => {
 	RegExp.prototype.test.call(regex);
@@ -425,13 +427,13 @@ const buffer_to_numbers = buffer => list_map(value, new Uint8Array(buffer_from(b
 
 const hex_to_buffer = hex => numbers_to_buffer(fn_to_list(append => {
 	hex = string_from(hex);
-	let i = hex.length;
-	if(i % 2) throw_syntax_error();
-	while(i) append((async () => {
-		const byte = await defer(hex.substring.bind(hex), i, i -= 2);
+	const {length} = hex;
+	if(length % 2) throw_syntax_error();
+	for(let i = length; i; i -= 2) append(defer(async () => {
+		const byte = hex.slice(i - 2, i);
 		if(/^[\da-f]*$/iu.test(byte)) return Number.parseInt(byte, 16);
 		throw_syntax_error();
-	})());
+	}));
 }));
 
 const code_to_list = code => {
