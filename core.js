@@ -507,6 +507,7 @@ const list_normalize = (() => {
 	const lists = new WeakSet;
 	return async list => {
 		if(lists.has(list) || !await is_list(list)) return list;
+		list = await list_clone(list);
 		const [first, rest] = await list_next(list);
 		list = !rest || (await list_next(rest))[1] ? list_map(list_normalize, list) : list_normalize(await first);
 		lists.add(list);
