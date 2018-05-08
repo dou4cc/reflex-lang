@@ -2,6 +2,25 @@
 
 "use strict";
 
+const fn_from = a => ({key(){
+	return Function.prototype.apply.call(a, this, arguments);
+}}.key);
+
+const [number_from, big_int_from] = [
+	1,
+	1n,
+].map(macro => a => macro * a);
+
+const [string_from, buffer_from] = [
+	String,
+	ArrayBuffer,
+].map(macro => a => macro.prototype.slice.call(a));
+
+const regex_from = regex => {
+	RegExp.prototype.test.call(regex);
+	return new RegExp(regex);
+};
+
 const equal = (a, b) => [a].includes(b);
 
 const capture = async => {
@@ -67,27 +86,15 @@ const lazy = thunk => {
 	};
 };
 
-const catch_all = async (...args) => {
-	try{
-		return await call(...args);
-	}catch(error){
-		(await throw_call_stack_error)(error);
-	}
-};
-
-const [number_from, big_int_from] = [
-	1,
-	1n,
-].map(macro => a => macro * a);
-
-const [string_from, buffer_from] = [
-	String,
-	ArrayBuffer,
-].map(macro => a => macro.prototype.slice.call(a));
-
-const regex_from = regex => {
-	RegExp.prototype.test.call(regex);
-	return new RegExp(regex);
+const catch_all = (...args) => {
+	const async = call(...args);
+	return (async () => {
+		try{
+			return await async;
+		}catch(error){
+			(await throw_call_stack_error)(error);
+		}
+	})();
 };
 
 const scheduler = (free, mode = (fn, ...args) => fn(...args)) => {
@@ -247,7 +254,7 @@ const [is_list, list, list_clone] = (() => {
 							"iterator",
 						]){
 							iter = a[Symbol[iter]];
-							if(iter != null) return is_object(Function.prototype.call.call(iter, a));
+							if(iter != null) return is_object(fn_from(iter).call(a));
 						}
 					})));
 				}
@@ -280,7 +287,7 @@ const [is_list, list, list_clone] = (() => {
 				return entry;
 			});
 			const list = {};
-			if(!Reflect.defineProperty(list, key, {value: () => {
+			Reflect.defineProperty(list, key, {value: () => {
 				let cursor = entry;
 				const iter = {
 					[key]: () => iter,
@@ -294,7 +301,7 @@ const [is_list, list, list_clone] = (() => {
 					}),
 				};
 				return iter;
-			}})) throw_unsupported_error();
+			}});
 			lists.add(list);
 			return [list, returns];
 		},
@@ -326,7 +333,7 @@ const list_map = fn_bind(fn_to_list, async (append, fn, list) => {
 	for await(let a of list) await append((async () => fn(await a))());
 });
 
-const list_flat_map = async (fn, list) => await is_list(list) ? list_map(fn_bind(list_flat_map, fn), list) : fn(list);
+const list_map_rec = async (fn, list) => await is_list(list) ? list_map(fn_bind(list_map_rec, fn), list) : fn(list);
 
 const throw_unsupported_error = () => {
 	throw new TypeError("Unsupported");
@@ -497,7 +504,7 @@ const string_to_utf8 = async string => numbers_to_buffer(list_concat(list_map(a 
 const big_int_to_uint = fn_bind(fn_to_list, async (append, big_int) => {
 	const write = byte => append(numbers_to_buffer([Number(byte)]));
 	big_int = big_int_from(big_int);
-	if(big_int < 0n) throw new RangeError("Signed");
+	if(big_int < 0n) throw new RangeError("Overflowed");
 	let last;
 	for(; ; ){
 		last = big_int & 0x7fn;
@@ -510,31 +517,32 @@ const big_int_to_uint = fn_bind(fn_to_list, async (append, big_int) => {
 
 const buffer_to_binary = buffer => string_concat(list_map(String.fromCodePoint, buffer_to_numbers(buffer)));
 
-const list_normalize = (() => {
-	const lists = new WeakSet;
-	return async list => {
-		if(lists.has(list) || !await is_list(list)) return list;
-		list = await list_clone(list);
-		const [first, rest] = await list_next(list);
-		list = !rest || (await list_next(rest))[1] ? list_map(list_normalize, list) : list_normalize(await first);
-		lists.add(list);
-		return list;
-	};
-})();
+const list_normalize = async list => {
+	if(!await is_list(list)) return list;
+	list = await list_clone(list);
+	const [first, rest] = await list_next(list);
+	return !rest || (await list_next(rest))[1] ? list : list_normalize(await first);
+};
+
+const list_normalize_rec = async list => {
+	list = await list_normalize(list);
+	return await is_list(list) ? list_map(list_normalize_rec, list) : list;
+};
 
 const reflexion = (extension = value) => {
-	const list_enum = (list0, exit0) => {
-		list0 = capture((async () => list_clone(await list0))());
+	const list_enum = (list, exit0) => {
+		const list0 = lazy(async () => list_normalize(await list));
 		return async method => {
 			switch(method){
 				case "done":
 				return [exit0, false];
 				case "next":
-				return [exit0, capture(((async () => list_normalize(await list0)))())];
+				return [exit0, capture(list0())];
 				case "enter":
 				return [async method => {
 					if(method === "exit") return [exit0];
-					const [value, list] = await is_list(await list0) ? await list_next(await list0) : [list0, []];
+					let list = await list0();
+					const [value] = [, list] = await list_next(await is_list(list) ? list : [list]);
 					const exit = fn_bind(defer, capture(defer(async () => (await list_enum(list || [], exit0)("enter"))[0])));
 					if(!list) switch(method){
 						case "done":
@@ -758,7 +766,7 @@ const reflexion = (extension = value) => {
 			].forEach(macros => reflexion[macros[0]] = fn_bind(commit, async (ref, wildcard, pattern, reflex) => ref[macros[1]](fn_to_list(async append => {
 				const [begin, end] = gen(Symbol);
 				let matching;
-				for await(let a of list_flatten(begin, end, await list_normalize(pattern))){
+				for await(let a of list_flatten(begin, end, await list_normalize_rec(pattern))){
 					a = await a;
 					if(matching){
 						matching = false;
