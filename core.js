@@ -823,29 +823,29 @@ const reflexion = (extension = value) => {
 				defer(...args);
 			}),
 			fn_bind(lock0, "readwrite", async () => {
-				const assert_not_used = () => {
-					if(used) assert_not_closed();
+				const assert_not_committed = () => {
+					if(committed) assert_not_closed();
 				};
 				if(closed) return;
 				if(shared) return reflexion(ref0, shared);
-				let used;
+				let committed;
 				const lock0 = lock();
 				closed = true;
 				return create_reflexion(
 					async (commit, ...args) => {
 						await lock0("readwrite", async () => {
-							assert_not_used();
-							used = true;
+							assert_not_committed();
+							committed = true;
 						});
 						commit(ref0, ...args);
 						return reflexion(ref0, shared);
 					},
 					fn_bind(lock0, "readonly", (...args) => {
-						assert_not_used();
+						assert_not_committed();
 						(shared ? defer : call)(...args);
 					}),
 					fn_bind(lock0, "readonly", (...args) => {
-						assert_not_used();
+						assert_not_committed();
 						shared = true;
 						defer(...args);
 					}),
@@ -858,6 +858,9 @@ const reflexion = (extension = value) => {
 };
 
 const buffer_random = () => numbers_to_buffer([Math.random() * 0x100]);
+
+const UID = (free = () => {}) => {
+};
 
 const bin2buffer = binary => new Uint8Array(Array.from(binary).map(a => a.codePointAt())).buffer;
 
