@@ -556,25 +556,18 @@ const reflexion = (extension = value) => {
 			return [];
 		};
 	};
-	const node = (node0, free = () => {}) => {
+	const node = node0 => {
 		const init = () => {
 			node1.values_count = values_count;
 			node1.children_count = children_count;
 			sweep();
 		};
 		const count = node => node.values_count + node.children_count;
-		const check = async () => {
-			if(!count(node1)) await free();
-		};
-		const create_child = (children, key, child = {methods: node1.methods}) => {
-			child = node(child, async () => {
-				await children_lock("readonly", () => children_count && children.black.add(key));
-				children.white.delete(key);
-				node1.children_count -= 1n;
-				await check();
-			});
-			children.white.set(key, child);
-			return child;
+		const free = async (children, key) => {
+			if(count(children.white.get(key))) return;
+			await children_lock("readonly", () => children_count && children.black.add(key));
+			children.white.delete(key);
+			node1.children_count -= 1n;
 		};
 		const sweep = fn_bind(defer, async () => {
 			if(!(await list_to_array([
@@ -607,7 +600,8 @@ const reflexion = (extension = value) => {
 				await mode(0);
 				const child0 = await node0.child(method, key);
 				if(child0){
-					const child = create_child(children, key, child0);
+					const child = node(child0);
+					children.white.set(key, child);
 					children_count -= 1n;
 					sweep();
 					return child;
@@ -623,30 +617,27 @@ const reflexion = (extension = value) => {
 			cursor = capture(defer(list_next, cursor));
 			const [async0, resolve] = async();
 			await lock0("readwrite", async () => {
-				try{
-					const [branch] = [, cursor] = await cursor;
-					if(!cursor) return resolve(values_mutex(1, values.threads, value, async () => {
-						if(await has(value)) return;
-						node1.values_count += 1n;
-						values.white.add(value);
-					}));
-					const [method, key] = await list_to_array(await branch);
-					const children = branches.get(method);
-					resolve(children_mutex(1, children.threads, key, async () => {
-						let child0 = await child(method, key);
-						if(!child0){
-							node1.children_count += 1n;
-							child0 = create_child(children, key);
-						}
-						const count0 = count(child0);
-						const async = child0.add(cursor, value);
-						if(!count0) await async;
-					}));
-				}catch(error){
-					resolve();
-					await check();
-					throw error;
-				}
+				const [branch] = [, cursor] = await cursor;
+				if(!cursor) return resolve(values_mutex(1, values.threads, value, async () => {
+					if(await has(value)) return;
+					node1.values_count += 1n;
+					values.white.add(value);
+				}));
+				const [method, key] = await list_to_array(await branch);
+				const children = branches.get(method);
+				resolve(children_mutex(1, children.threads, key, async () => {
+					let child0 = await child(method, key);
+					if(!child0){
+						node1.children_count += 1n;
+						child0 = node({methods: node1.methods});
+						children.white.set(key, child0);
+					}
+					const count0 = count(child0);
+					const async = child0.add(cursor, value);
+					if(count0) return;
+					await dispatch(async);
+					await free(children, key);
+				}));
 			});
 			await async0;
 		});
@@ -660,15 +651,17 @@ const reflexion = (extension = value) => {
 					await values_lock("readonly", () => values_count && values.black.add(value));
 					values.white.delete(value);
 					node1.values_count -= 1n;
-					await check();
 				}));
 				const [method, key] = await list_to_array(await branch);
-				resolve(children_mutex(1, branches.get(method).threads, key, async () => {
+				const children = branches.get(method);
+				resolve(children_mutex(1, children.threads, key, async () => {
 					const child0 = await child(method, key);
 					if(!child0) return;
 					const count0 = count(child0);
 					const async = child0.delete(cursor, value);
-					if(count0 <= 1n) await async;
+					if(count0 > 1n) return;
+					await dispatch(async);
+					await free(children, key);
 				}));
 			});
 			await async0;
