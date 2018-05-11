@@ -205,8 +205,8 @@ const schedulers = mode => {
 	const map = new Map;
 	return fn_bind(lock0, "readwrite", (key, ...args) => {
 		if(!map.has(key)){
-			const mode0 = scheduler(fn_bind(atom_lock, lock0, 2, async (mode, idle) => {
-				if(!idle()) return;
+			const mode0 = scheduler(fn_bind(atom_lock, lock0, 2, async (mode, empty) => {
+				if(!empty()) return;
 				await mode(1);
 				if(map.get(key) !== mode0) return;
 				await mode(0);
@@ -859,7 +859,52 @@ const reflexion = (extension = value) => {
 
 const buffer_random = () => numbers_to_buffer([Math.random() * 0x100]);
 
+const buffer_concat = buffers => numbers_to_buffer(list_concat(list_map(buffer_to_numbers, buffers)));
+
 const UID = (free = () => {}) => {
+	free = fn_bind(defer, free, () => !alloced && !children.size);
+	const lock0 = lock();
+	const locks = schedulers(lock);
+	let alloced;
+	const children = new Map;
+	return {
+		alloc: fn_bind(atom_lock, lock0, 2, async mode => {
+			if(!alloced){
+				await mode(0);
+				alloced = true;
+				return new ArrayBuffer;
+			}
+			const byte = await buffer_random();
+			const key = await buffer_to_binary(byte);
+			return atom_lock(fn_bind(locks, key), 1, async mode => {
+				if(!children.has(key)){
+					await mode(0);
+					const UID0 = UID(fn_bind(atom_lock, fn_bind(locks, key), 2, async (mode, empty) => {
+						if(!empty()) return;
+						await mode(1);
+						if(children.get(key) !== UID0) return;
+						await mode(0);
+						children.delete(key);
+						free();
+					}));
+					children.set(key, UID0);
+				}
+				return buffer_concat([byte, await children.get(key).alloc()]);
+			});
+		}),
+		free: fn_bind(atom_lock, lock0, 2, async (mode, UID) => {
+			UID = buffer_from(UID);
+			if(!UID.byteLength){
+				if(!alloced) return;
+				await mode(0);
+				alloced = false;
+				free();
+				return;
+			}
+			const key = await buffer_to_binary(UID.slice(0, 1));
+			return locks(key, "readonly", () => children.has(key) && children.get(key).free(UID.slice(1)));
+		}),
+	};
 };
 
 const bin2buffer = binary => new Uint8Array(Array.from(binary).map(a => a.codePointAt())).buffer;
