@@ -913,6 +913,38 @@ const UID = (free = () => {}) => {
 };
 
 const list_match = async (wildcard, pattern, list) => {
+	const next = async a => {
+		const [value] = [, list] = await list_next(list);
+		if(!list) return;
+		const $1 = await list_match(a, await value);
+		if($1) return $.push(...$1);
+	};
+	[pattern, list] = await Promise.all([
+		pattern,
+		list,
+	].map(list_normalize));
+	if(!await is_list(pattern)){
+		if(equal(pattern, wildcard)) return [await is_list(list) ? list : await list_clone([list])];
+		if(equal(pattern, list)) return [];
+		return null;
+	}
+	if(!await is_list(list)) return null;
+	const $ = [];
+	let matching;
+	for(let a of pattern){
+		if(matching){
+			matching = false;
+			if(!await next(wildcard)) return null;
+		}
+		a = await a;
+		if(equal(a, wildcard)){
+			matching = true;
+			continue;
+		}
+		if(!await next(a)) return null;
+	}
+	if(matching) $.push(list || await list_clone([]));
+	return $;
 };
 
 const bin2buffer = binary => new Uint8Array(Array.from(binary).map(a => a.codePointAt())).buffer;
