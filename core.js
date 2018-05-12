@@ -1,4 +1,4 @@
-//ES2018 with BigInt
+//ES2018, BigInt
 
 "use strict";
 
@@ -19,6 +19,12 @@ const [string_from, buffer_from] = [
 const regex_from = regex => {
 	RegExp.prototype.test.call(regex);
 	return new RegExp(regex);
+};
+
+const param_from = async param => {
+	param = string_from(param);
+	if(/^\$*$/u.test(param)) return param;
+	throw new SyntaxError("Cannot convert " + param + " to a param");
 };
 
 const equal = (a, b) => [a].includes(b);
@@ -233,7 +239,7 @@ const [is_string, is_big_int] = [
 	return true;
 });
 
-const is_param = a => is_string(a) && /^\$*$/u.test(a);
+const is_param = async a => is_string(a) && Boolean(await catch_all(async () => [await param_from(a)]));
 
 const is_buffer = async a => Boolean(await catch_all(() => buffer_from(a)));
 
@@ -360,7 +366,7 @@ const throw_call_stack_error = capture(defer(async () => {
 }));
 
 const throw_syntax_error = () => {
-	throw new SyntaxError("Unexpected token");
+	throw new SyntaxError("Unexpected character or token");
 };
 
 const list_next = async list0 => {
@@ -448,6 +454,10 @@ const hex_to_buffer = hex => numbers_to_buffer(fn_to_list(append => {
 	}));
 }));
 
+const number_to_param = async number => "$".repeat(number);
+
+const param_to_number = async param => (await param_from(param)).length;
+
 const code_to_list = code => {
 	const [begin, end] = gen(Symbol);
 	const [list, rest] = list_unflatten(begin, end, list_concat([[begin], fn_to_list(async append => {
@@ -457,30 +467,33 @@ const code_to_list = code => {
 			if(!code1) break;
 			code = code1;
 			if(!/^#/u.test(token)) await append(defer(() => {
-				if(token === "[") return begin;
-				if(token === "]") return end;
-				if(/^`/u.test(token)) return token
-				.slice(1, -1)
-				.replace(/(^|[^\\])\\([nrt])/gu, (...$) => $[1] + new Map([
-					["n", "\n"],
-					["r", "\r"],
-					["t", "\t"],
-				]).get($[2]))
-				.replace(/(^|[^\\])\\(\[.*?(?:\]|$))/gu, (...$) => {
-					if(/^\[[\da-f]*\]$/iu.test($[2])) return $[1] + String.fromCodePoint(Number.parseInt("0" + $[2], 16));
-					throw_syntax_error();
-				})
-				.replace(/\\(\\+[nrt[]|\\*`)/gu, "$1");
-				if(/^%/u.test(token)) return hex_to_buffer(token.slice(1).replace(/-/gu, ""));
-				if(/^\d/u.test(token)){
+				if(token === "["){
+					return begin;
+				}else if(token === "]"){
+					return end;
+				}else if(/^`/u.test(token)){
+					return token
+					.slice(1, -1)
+					.replace(/(^|[^\\])\\([nrt])/gu, (...$) => $[1] + new Map([
+						["n", "\n"],
+						["r", "\r"],
+						["t", "\t"],
+					]).get($[2]))
+					.replace(/(^|[^\\])\\(\[.*?(?:\]|$))/gu, (...$) => {
+						if(/^\[[\da-f]*\]$/iu.test($[2])) return $[1] + String.fromCodePoint(Number.parseInt("0" + $[2], 16));
+						throw_syntax_error();
+					})
+					.replace(/\\(\\+[nrt[]|\\*`)/gu, "$1");
+				}else if(/^%/u.test(token)){
+					return hex_to_buffer(token.slice(1).replace(/-/gu, ""));
+				}else if(/^\d/u.test(token)){
 					if(/^(?!0.)\d+$/u.test(token)) return BigInt(token);
-					throw_syntax_error();
+				}else if(/^\$\d/u.test(token)){
+					if(/^\$(?!0.)\d+$/u.test(token)) return number_to_param(Number(token.slice(1)));
+				}else{
+					return token;
 				}
-				if(/^\$\d/u.test(token)){
-					if(/^\$(?!0.)\d+$/u.test(token)) return "$".repeat(Number(token.slice(1)));
-					throw_syntax_error();
-				}
-				return token;
+				throw_syntax_error();
 			}));
 		}
 		if(!/^\s*$/u.test(await string_concat(code))) throw_syntax_error();
@@ -557,11 +570,6 @@ const reflexion = (extension = value) => {
 		};
 	};
 	const node = node0 => {
-		const init = () => {
-			node1.values_count = values_count;
-			node1.children_count = children_count;
-			sweep();
-		};
 		const count = node => node.values_count + node.children_count;
 		const free = async (children, key) => {
 			if(count(children.white.get(key))) return;
@@ -610,6 +618,14 @@ const reflexion = (extension = value) => {
 				return child;
 			});
 		};
+		const init = () => {
+			node1.values_count = values_count;
+			node1.children_count = children_count;
+			sweep();
+		};
+		const placeholder = Symbol();
+		const [lock0, values_lock, children_lock] = gen(lock);
+		const [values_mutex, children_mutex] = gen(mutex);
 		const node1 = {};
 		node1.methods = [...node0.methods];
 		node1.mutex = mutex();
@@ -711,9 +727,6 @@ const reflexion = (extension = value) => {
 				})()), node1.methods));
 			});
 		});
-		const placeholder = Symbol();
-		const [lock0, values_lock, children_lock] = gen(lock);
-		const [values_mutex, children_mutex] = gen(mutex);
 		let [values_count, children_count] = gen(() => 0n);
 		const values = {};
 		values.threads = schedulers(thread);
@@ -897,6 +910,9 @@ const UID = (free = () => {}) => {
 			free();
 		}),
 	};
+};
+
+const list_match = async (wildcard, pattern, list) => {
 };
 
 const bin2buffer = binary => new Uint8Array(Array.from(binary).map(a => a.codePointAt())).buffer;
