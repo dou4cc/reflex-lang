@@ -530,16 +530,56 @@ const big_int_to_uint = fn_bind(fn_to_list, async (append, big_int) => {
 
 const buffer_to_binary = buffer => string_concat(list_map(String.fromCodePoint, buffer_to_numbers(buffer)));
 
-const list_normalize = async list => {
-	if(!await is_list(list)) return list;
-	list = await list_clone(list);
-	const [first, rest] = await list_next(list);
-	return !rest || (await list_next(rest))[1] ? list : list_normalize(await first);
-};
+const list_normalize = (() => {
+	const lists = new WeakSet;
+	return async list => {
+		if(!await is_list(list) || lists.has(list)) return list;
+		list = await list_clone(list);
+		const [first, rest] = await list_next(list);
+		if(rest && !(await list_next(rest))[1]) return list_normalize(await first);
+		lists.add(list);
+		return list;
+	};
+})();
 
 const list_normalize_rec = async list => {
 	list = await list_normalize(list);
 	return await is_list(list) ? list_map(list_normalize_rec, list) : list;
+};
+
+const list_match = async (wildcard, pattern, list) => {
+	const next = async a => {
+		const [value] = [, list] = await list_next(list);
+		if(!list) return;
+		const $1 = await list_match(a, await value);
+		if($1) return $.push(...$1);
+	};
+	[pattern, list] = await Promise.all([
+		pattern,
+		list,
+	].map(list_normalize));
+	if(!await is_list(pattern)){
+		if(equal(pattern, wildcard)) return [await is_list(list) ? list : await list_clone([list])];
+		if(equal(pattern, list)) return [];
+		return null;
+	}
+	if(!await is_list(list)) return null;
+	const $ = [];
+	let matching;
+	for(let a of pattern){
+		if(matching){
+			matching = false;
+			if(!await next(wildcard)) return null;
+		}
+		a = await list_normalize(await a);
+		if(equal(a, wildcard) && !await is_list(a)){
+			matching = true;
+			continue;
+		}
+		if(!await next(a)) return null;
+	}
+	if(matching) $.push(list || await list_clone([]));
+	return $;
 };
 
 const reflexion = (extension = value) => {
@@ -554,8 +594,7 @@ const reflexion = (extension = value) => {
 				case "enter":
 				return [async method => {
 					if(method === "exit") return [exit0];
-					let list = await list0();
-					const [value] = [, list] = await list_next(await is_list(list) ? list : [list]);
+					const [value, list] = await list_next(await list_match(null, null, await list0()));
 					const exit = fn_bind(defer, capture(defer(async () => (await list_enum(list || [], exit0)("enter"))[0])));
 					if(!list) switch(method){
 						case "done":
@@ -910,41 +949,6 @@ const UID = (free = () => {}) => {
 			free();
 		}),
 	};
-};
-
-const list_match = async (wildcard, pattern, list) => {
-	const next = async a => {
-		const [value] = [, list] = await list_next(list);
-		if(!list) return;
-		const $1 = await list_match(a, await value);
-		if($1) return $.push(...$1);
-	};
-	[pattern, list] = await Promise.all([
-		pattern,
-		list,
-	].map(list_normalize));
-	if(!await is_list(pattern)){
-		if(equal(pattern, wildcard)) return [await is_list(list) ? list : await list_clone([list])];
-		if(equal(pattern, list)) return [];
-		return null;
-	}
-	if(!await is_list(list)) return null;
-	const $ = [];
-	let matching;
-	for(let a of pattern){
-		if(matching){
-			matching = false;
-			if(!await next(wildcard)) return null;
-		}
-		a = await a;
-		if(equal(a, wildcard)){
-			matching = true;
-			continue;
-		}
-		if(!await next(a)) return null;
-	}
-	if(matching) $.push(list || await list_clone([]));
-	return $;
 };
 
 const bin2buffer = binary => new Uint8Array(Array.from(binary).map(a => a.codePointAt())).buffer;
