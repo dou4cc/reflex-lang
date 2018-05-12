@@ -269,7 +269,7 @@ const [is_list, list, list_clone] = (() => {
 				let resolve0;
 				const [entry] = [, resolve0] = async();
 				resolve([
-					async value => {
+					fn_bind(thread0, async value => {
 						const resolve1 = resolve0;
 						const [next] = [, resolve0] = async();
 						const [async0, resolve] = async();
@@ -278,12 +278,12 @@ const [is_list, list, list_clone] = (() => {
 							return next;
 						}), capture((async () => list_clone(await value))())]);
 						await async0;
-					},
-					() => resolve0(),
-					reason => resolve0((async () => {
+					}),
+					fn_bind(thread0, () => resolve0()),
+					fn_bind(thread0, reason => resolve0((async () => {
 						throw reason;
-					})()),
-				].map(fn => fn_bind(thread0, fn)));
+					})())),
+				]);
 				return entry;
 			});
 			const list = {};
@@ -504,7 +504,7 @@ const string_to_utf8 = async string => numbers_to_buffer(list_concat(list_map(a 
 const big_int_to_uint = fn_bind(fn_to_list, async (append, big_int) => {
 	const write = byte => append(numbers_to_buffer([Number(byte)]));
 	big_int = big_int_from(big_int);
-	if(big_int < 0n) throw new RangeError("Overflowed");
+	if(big_int < 0n) throw new RangeError("Negative");
 	let last;
 	for(; ; ){
 		last = big_int & 0x7fn;
@@ -581,14 +581,14 @@ const reflexion = (extension = value) => {
 			return atom_lock(values_lock, 1, async mode => {
 				if(!values_count) return false;
 				await mode(0);
-				if(!await node0.has(value)){
-					values.black.add(value);
-					return false;
+				if(await node0.has(value)){
+					values.white.add(value);
+					values_count -= 1n;
+					sweep();
+					return true;
 				}
-				values.white.add(value);
-				values_count -= 1n;
-				sweep();
-				return true;
+				values.black.add(value);
+				return false;
 			});
 		};
 		const child = (method, key) => {
@@ -626,12 +626,12 @@ const reflexion = (extension = value) => {
 				const [method, key] = await list_to_array(await branch);
 				const children = branches.get(method);
 				resolve(children_mutex(1, children.threads, key, async () => {
-					let child0 = await child(method, key);
-					if(!child0){
+					const child0 = await child(method, key) || (() => {
 						node1.children_count += 1n;
-						child0 = node({methods: node1.methods});
-						children.white.set(key, child0);
-					}
+						const child = node({methods: node1.methods});
+						children.white.set(key, child);
+						return child;
+					})();
 					const count0 = count(child0);
 					const async = child0.add(cursor, value);
 					if(count0) return;
@@ -646,7 +646,7 @@ const reflexion = (extension = value) => {
 			const [async0, resolve] = async();
 			await lock0("readwrite", async () => {
 				const [branch] = [, cursor] = await cursor;
-				if(!cursor) resolve(values_mutex(1, values.threads, value, async () => {
+				if(!cursor) return resolve(values_mutex(1, values.threads, value, async () => {
 					if(!await has(value)) return;
 					await values_lock("readonly", () => values_count && values.black.add(value));
 					values.white.delete(value);
@@ -712,10 +712,9 @@ const reflexion = (extension = value) => {
 			});
 		});
 		const placeholder = Symbol();
-		let values_count = 0n;
-		let children_count = 0n;
 		const [lock0, values_lock, children_lock] = gen(lock);
 		const [values_mutex, children_mutex] = gen(mutex);
+		let [values_count, children_count] = gen(() => 0n);
 		const values = {};
 		values.threads = schedulers(thread);
 		[values.black, values.white] = gen(() => new Set);
@@ -887,15 +886,15 @@ const UID = (free = () => {}) => {
 		}),
 		free: fn_bind(atom_lock, lock0, 2, async (mode, UID) => {
 			UID = buffer_from(UID);
-			if(!UID.byteLength){
-				if(!alloced) return;
-				await mode(0);
-				alloced = false;
-				free();
+			if(UID.byteLength){
+				const key = await buffer_to_binary(UID.slice(0, 1));
+				await locks(key, "readonly", () => children.has(key) && children.get(key).free(UID.slice(1)));
 				return;
 			}
-			const key = await buffer_to_binary(UID.slice(0, 1));
-			return locks(key, "readonly", () => children.has(key) && children.get(key).free(UID.slice(1)));
+			if(!alloced) return;
+			await mode(0);
+			alloced = false;
+			free();
 		}),
 	};
 };
