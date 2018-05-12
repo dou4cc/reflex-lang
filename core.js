@@ -594,7 +594,7 @@ const reflexion = (extension = value) => {
 				case "enter":
 				return [async method => {
 					if(method === "exit") return [exit0];
-					const [value, list] = await list_next(await list_match(null, null, await list0()));
+					const [value, list] = await list_next((await list_match(null, null, await list0()))[0]);
 					const exit = fn_bind(defer, capture(defer(async () => (await list_enum(list || [], exit0)("enter"))[0])));
 					if(!list) switch(method){
 						case "done":
