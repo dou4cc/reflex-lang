@@ -580,7 +580,7 @@ const list_match = async (wildcard, pattern, list) => {
 		list,
 	].map(list_normalize));
 	if(!await is_list(pattern)){
-		if(equal(pattern, wildcard)) return [await is_list(list) ? list : await list_clone([list])];
+		if(equal(pattern, wildcard)) return [await is_list(list) ? list : list_map(value, [list])];
 		if(equal(pattern, list)) return [];
 		return null;
 	}
@@ -599,7 +599,7 @@ const list_match = async (wildcard, pattern, list) => {
 		}
 		if(!await next(a)) return null;
 	}
-	if(matching) $.push(list || await list_clone([]));
+	if(matching) $.push(list || list_map(value, []));
 	return $;
 };
 
