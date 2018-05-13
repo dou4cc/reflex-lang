@@ -21,8 +21,10 @@ const regex_from = regex => {
 	return new RegExp(regex);
 };
 
+const binary_from = fn_bind(call, string_from);
+
 const param_from = async param => {
-	param = string_from(param);
+	param = await binary_from(param);
 	if(/^\$*$/u.test(param)) return param;
 	throw new SyntaxError("Cannot convert " + param + " to a param");
 };
@@ -249,8 +251,10 @@ const is_buffer = a => {
 	return true;
 };
 
+const is_binary = fn_bind(call, is_string);
+
 const is_param = async a => {
-	if(!is_string(a)) return false;
+	if(!await is_binary(a)) return false;
 	try{
 		await param_from(a);
 	}catch(error){
@@ -386,7 +390,7 @@ const throw_syntax_error = () => {
 	throw new SyntaxError("Unexpected character or token");
 };
 
-const list_next = async list0 => {
+const list_shift = async list0 => {
 	const list = (async function*(){
 		for await(let a of list0) yield thunk(a);
 	})();
@@ -405,8 +409,8 @@ const list_flatten = fn_bind(fn_to_list, async (append, begin, end, list) => {
 });
 
 const list_unflatten = (begin, end, list) => list_parse(fn_to_list(async append => {
-	if(equal(await ([, list] = await list_next(list))[0], begin)) for(; ; ){
-		const [value] = [, list] = await list_next(list);
+	if(equal(await ([, list] = await list_shift(list))[0], begin)) for(; ; ){
+		const [value] = [, list] = await list_shift(list);
 		if(!list) break;
 		value = await value;
 		if(equal(value, end)) return;
@@ -420,7 +424,7 @@ const strings_match = async (regex, strings) => {
 	let string = "";
 	let $;
 	while(!($ = regex.exec(string))){
-		const [value] = [, strings] = await list_next(strings);
+		const [value] = [, strings] = await list_shift(strings);
 		if(!strings) return [];
 		string += await value;
 	}
@@ -552,8 +556,8 @@ const list_normalize = (() => {
 	return async list => {
 		if(!await is_list(list) || lists.has(list)) return list;
 		list = await list_map(value, list);
-		const [first, rest] = await list_next(list);
-		if(rest && !(await list_next(rest))[1]) return list_normalize(await first);
+		const [first, rest] = await list_shift(list);
+		if(rest && !(await list_shift(rest))[1]) return list_normalize(await first);
 		lists.add(list);
 		return list;
 	};
@@ -566,7 +570,7 @@ const list_normalize_rec = async list => {
 
 const list_match = async (wildcard, pattern, list) => {
 	const next = async a => {
-		const [value] = [, list] = await list_next(list);
+		const [value] = [, list] = await list_shift(list);
 		if(!list) return;
 		const $1 = await list_match(a, await value);
 		if($1) return $.push(...$1);
@@ -611,7 +615,7 @@ const reflexion = (extension = value) => {
 				case "enter":
 				return [async method => {
 					if(method === "exit") return [exit0];
-					const [value, list] = await list_next(...await list_match(null, null, await list0()));
+					const [value, list] = await list_shift(...await list_match(null, null, await list0()));
 					const exit = fn_bind(defer, capture(defer(async () => (await list_enum(list || [], exit0)("enter"))[0])));
 					if(!list) switch(method){
 						case "done":
@@ -686,7 +690,7 @@ const reflexion = (extension = value) => {
 		node1.methods = [...node0.methods];
 		node1.mutex = mutex();
 		node1.add = fn_bind(node1.mutex, 1, async (cursor, value) => {
-			cursor = capture(defer(list_next, cursor));
+			cursor = capture(defer(list_shift, cursor));
 			const [async0, resolve] = async();
 			await lock0("readwrite", async () => {
 				const [branch] = [, cursor] = await cursor;
@@ -714,7 +718,7 @@ const reflexion = (extension = value) => {
 			await async0;
 		});
 		node1.delete = fn_bind(node1.mutex, 1, async (cursor, value) => {
-			cursor = capture(defer(list_next, cursor));
+			cursor = capture(defer(list_shift, cursor));
 			const [async0, resolve] = async();
 			await lock0("readwrite", async () => {
 				const [branch] = [, cursor] = await cursor;
@@ -969,7 +973,7 @@ const UID = (free = () => {}) => {
 };
 
 const vm_pause = async vm => {
-	const hook = vm => resolve(vm.off(null, "pause", hook));
+	const hook = async vm => resolve((await vm.close()).off(null, "pause", hook));
 	const [async0, resolve] = async();
 	return [await vm.on(null, "pause", hook), async0];
 };
