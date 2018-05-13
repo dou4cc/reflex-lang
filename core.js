@@ -973,9 +973,9 @@ const UID = (free = () => {}) => {
 };
 
 const vm_pause = async vm => {
-	const hook = async vm => resolve((await vm.close()).off(null, "pause", hook));
+	const hook = [null, "pause", async vm => resolve((await vm.close()).off(...hook))];
 	const [async0, resolve] = async();
-	return [await vm.on(null, "pause", hook), async0];
+	return [await vm.on(...hook), async0];
 };
 
 const uint_parse = uint => list_parse(fn_to_list(async append => {
