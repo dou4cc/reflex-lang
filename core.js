@@ -396,7 +396,7 @@ const list_next = async list0 => {
 
 const list_parse = (list, rest) => [list, fn_to_list(async append => {
 	for await(let _ of list);
-	for await(let a of rest()) await append(a);
+	for await(let a of rest() || []) await append(a);
 })];
 
 const list_flatten = fn_bind(fn_to_list, async (append, begin, end, list) => {
@@ -973,6 +973,12 @@ const vm_pause = async vm => {
 	const [async0, resolve] = async();
 	return [await vm.on(null, "pause", hook), async0];
 };
+
+const uint_parse = uint => list_parse(fn_to_list(async append => {
+	for(; ; ){
+		
+	}
+}), () => uint);
 
 const bin2buffer = binary => new Uint8Array(Array.from(binary).map(a => a.codePointAt())).buffer;
 
