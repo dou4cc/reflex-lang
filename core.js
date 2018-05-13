@@ -969,6 +969,9 @@ const UID = (free = () => {}) => {
 };
 
 const vm_pause = async vm => {
+	const hook = vm => resolve(vm.off(null, "pause", hook));
+	const [async0, resolve] = async();
+	return [await vm.on(null, "pause", hook), async0];
 };
 
 const bin2buffer = binary => new Uint8Array(Array.from(binary).map(a => a.codePointAt())).buffer;
