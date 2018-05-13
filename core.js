@@ -233,15 +233,32 @@ const [is_string, is_big_int] = [
 	try{
 		macro.prototype.valueOf.call(a);
 	}catch(error){
-		if(!(error instanceof TypeError)) throw error;
-		return false;
+		if(error instanceof TypeError) return false;
+		throw error;
 	}
 	return true;
 });
 
-const is_param = async a => is_string(a) && Boolean(await catch_all(async () => [await param_from(a)]));
+const is_buffer = a => {
+	try{
+		buffer_from(a);
+	}catch(error){
+		if(error instanceof TypeError) return false;
+		throw error;
+	}
+	return true;
+};
 
-const is_buffer = async a => Boolean(await catch_all(() => buffer_from(a)));
+const is_param = async a => {
+	if(!is_string(a)) return false;
+	try{
+		await param_from(a);
+	}catch(error){
+		if(error instanceof TypeError) return false;
+		throw error;
+	}
+	return true;
+};
 
 const [is_list, list, list_clone] = (() => {
 	const locks = schedulers(lock);
@@ -534,7 +551,7 @@ const list_normalize = (() => {
 	const lists = new WeakSet;
 	return async list => {
 		if(!await is_list(list) || lists.has(list)) return list;
-		list = await list_clone(list);
+		list = await list_map(value, list);
 		const [first, rest] = await list_next(list);
 		if(rest && !(await list_next(rest))[1]) return list_normalize(await first);
 		lists.add(list);
@@ -594,7 +611,7 @@ const reflexion = (extension = value) => {
 				case "enter":
 				return [async method => {
 					if(method === "exit") return [exit0];
-					const [value, list] = await list_next((await list_match(null, null, await list0()))[0]);
+					const [value, list] = await list_next(...await list_match(null, null, await list0()));
 					const exit = fn_bind(defer, capture(defer(async () => (await list_enum(list || [], exit0)("enter"))[0])));
 					if(!list) switch(method){
 						case "done":
@@ -949,6 +966,9 @@ const UID = (free = () => {}) => {
 			free();
 		}),
 	};
+};
+
+const vm_pause = async vm => {
 };
 
 const bin2buffer = binary => new Uint8Array(Array.from(binary).map(a => a.codePointAt())).buffer;
